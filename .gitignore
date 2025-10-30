@@ -28,3 +28,4 @@ downloads/*
 *.sw?
 
 .vercel
+.env*.local
