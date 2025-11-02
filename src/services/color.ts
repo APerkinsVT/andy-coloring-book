@@ -555,12 +555,15 @@ function mergeNearDuplicates(clusters: ColorCluster[], mergeDE00: number): Color
           work[i].coverage = cov;
 
           if (work[i].salience && work[j].salience) {
-            work[i].salience.coverage = cov;
-            work[i].salience.coherence = work[i].salience.coherence * w1 + work[j].salience.coherence * w2;
-            work[i].salience.contrast  = work[i].salience.contrast  * w1 + work[j].salience.contrast  * w2;
-            work[i].salience.chroma    = work[i].salience.chroma    * w1 + work[j].salience.chroma    * w2;
-            work[i].salience.subjectBoost =
-              work[i].salience.subjectBoost * w1 + work[j].salience.subjectBoost * w2;
+            // Non-null locals so TS is happy under strict checks
+            const si = work[i].salience!;
+            const sj = work[j].salience!;
+
+            si.coverage = cov;
+            si.coherence = si.coherence * w1 + sj.coherence * w2;
+            si.contrast  = si.contrast  * w1 + sj.contrast  * w2;
+            si.chroma    = si.chroma    * w1 + sj.chroma    * w2;
+            si.subjectBoost = si.subjectBoost * w1 + sj.subjectBoost * w2;
           }
 
           work.splice(j, 1);
