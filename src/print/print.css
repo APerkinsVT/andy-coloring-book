@@ -1,0 +1,65 @@
+/* src/print/print.css
+   Safe, minimal print rules. No aggressive selectors.
+*/
+
+@page {
+  size: letter portrait;
+  margin: 0.5in;
+}
+
+/* Orientation (one per job). Body gets one of these classes. */
+.print-landscape @page { size: letter landscape; }
+.print-portrait  @page { size: letter portrait; }
+
+/* Screen overlay while previewing print layout */
+@media screen {
+  .print-root {
+    position: fixed;
+    inset: 0;
+    background: #fff;
+    z-index: 9999;
+    overflow: auto;
+  }
+}
+
+/* Only hide BODY's direct children that aren't the print-root. Leave descendants alone. */
+@media print {
+  body > * { display: none !important; }
+  body > .print-root { display: block !important; }
+}
+
+/* Page block (one per sheet we render) */
+.page {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Title */
+.print-title {
+  text-align: center;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  font-size: 18pt;
+  line-height: 1.2;
+  margin: 0 0 0.25in 0;
+  color: #000;
+}
+
+/* Line-art container and image */
+.lineart-frame {
+  display: grid;
+  place-items: center;
+}
+
+.lineart-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Slight framing for print; harmless in preview */
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  /* Don’t exceed the printable height: letter height (11in) - margins (1in total) - title (≈0.5in) */
+  max-height: calc(11in - 1in - 0.6in);
+  object-fit: contain;
+}

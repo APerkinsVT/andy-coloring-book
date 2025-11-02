@@ -1,182 +1,403 @@
-// src/App.tsx
-import React, { useRef, useState, useEffect } from "react";
-import { generateAiLineArt } from "./services/aiLineart";
-import { debugDumpFC } from "./services/color";
-import { buildPdf } from "./utils/pdf";
+/* src/App.tsx */
 
-type AppState = {
-  originalDataUrl?: string;
-  lineArtUrl?: string;
-  busy: boolean;
-  error?: string;
-};
+import React from "react";
+import "@/index.css";
 
+import ColorPlanPanel from "@/components/ColorPlanPanel";
+import TipsPanel from "@/components/TipsPanel";
+
+import type { ColorPlan, ColorCluster } from "@/types/color-plan";
+import { KitSize } from "@/types/color-plan";
+import type { Tip } from "@/types/tips";
+
+import { generateColorPlan } from "@/services/color";
+import { generateAiLineArt } from "@/services/aiLineart";
+import { openPrintView } from "@/print";
+import { suggestTips } from "@/utils/suggestTips";
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Types
+   ──────────────────────────────────────────────────────────────────────────── */
+type GenStatus = "idle" | "generating" | "done" | "error";
+type AnalyzeStatus = "idle" | "analyzing" | "done" | "error";
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Component
+   ──────────────────────────────────────────────────────────────────────────── */
 export default function App() {
-  const [state, setState] = useState<AppState>({ busy: false });
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  /* ======================
+     SECTION B: state
+     ====================== */
+  const [fileName, setFileName] = React.useState<string | undefined>(undefined);
+  const [sourceUrl, setSourceUrl] = React.useState<string | undefined>(undefined);
+  const [sourceDataUrl, setSourceDataUrl] = React.useState<string | undefined>(undefined);
+  const [lineUrl, setLineUrl] = React.useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    // sanity log for your FC palette util (safe to remove later)
-    debugDumpFC(8);
-  }, []);
+  const [genStatus, setGenStatus] = React.useState<GenStatus>("idle");
+  const [anStatus, setAnStatus] = React.useState<AnalyzeStatus>("idle");
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
-  const onPick = () => fileInputRef.current?.click();
+  const [plan, setPlan] = React.useState<ColorPlan | null>(null);
 
-  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+  const imgRef = React.useRef<HTMLImageElement | null>(null);
+
+  // current kit from the panel's <select id="kit">
+  const kit: KitSize = (() => {
+    const el = document.getElementById("kit") as HTMLSelectElement | null;
+    return el ? (Number(el.value) as KitSize) : (KitSize.K72 as KitSize);
+  })();
+
+  // rows for tips & printing (deduped, same as Page 3)
+  const rowsForTips = React.useMemo(() => {
+    if (!plan) return [];
+    return buildPrintableFromPlan(plan, kit).rows;
+  }, [plan, kit]);
+
+  // auto-suggested tips, always in sync with image + kit
+  const tipsSuggested: Tip[] = React.useMemo(() => {
+    return suggestTips(rowsForTips);
+  }, [rowsForTips]);
+
+  /* ======================
+     SECTION C: handlers
+     ====================== */
+
+  function onChoosePhoto(ev: React.ChangeEvent<HTMLInputElement>) {
+    const f = ev.target.files?.[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () =>
-      setState((s) => ({
-        ...s,
-        originalDataUrl: reader.result as string,
-        lineArtUrl: undefined,
-        error: undefined,
-      }));
-    reader.onerror = () => setState((s) => ({ ...s, error: "Failed to read file" }));
-    reader.readAsDataURL(f);
-  };
+    const url = URL.createObjectURL(f);
+    setFileName(f.name);
+    setSourceUrl(url);
+    setSourceDataUrl(undefined);
+    setLineUrl(undefined);
+    setPlan(null);
+    setGenStatus("idle");
+    setAnStatus("idle");
+    setErrorMsg(null);
+  }
 
-  const onReset = () => {
-    setState({ busy: false });
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
+  async function onGenerateLineArt() {
+    if (!imgRef.current) return;
+    setGenStatus("generating");
+    setErrorMsg(null);
 
-  const onGenerate = async () => {
-    if (!state.originalDataUrl) {
-      setState((s) => ({ ...s, error: "Choose a photo first." }));
-      return;
-    }
-    setState((s) => ({ ...s, busy: true, error: undefined }));
     try {
-      const { imageUrl /*, raw*/ } = await generateAiLineArt(state.originalDataUrl);
-      setState((s) => ({ ...s, lineArtUrl: imageUrl, busy: false }));
-    } catch (e: any) {
-      setState((s) => ({ ...s, busy: false, error: String(e?.message ?? e) }));
-    }
-  };
+      const imageDataUrl = imageToDataUrl(imgRef.current, 1600);
+      setSourceDataUrl(imageDataUrl);
 
-  // NEW: PDF builder hook-up
-  const onDownloadPdf = () => {
-    if (!state.originalDataUrl || !state.lineArtUrl) return;
-    const doc = buildPdf({
-      title: "Coloring Page",
-      originalDataUrl: state.originalDataUrl,
-      lineArtUrl: state.lineArtUrl,
-      guide: [
-        "Lay down light layers first; build depth gradually.",
-        "Leave highlights white for glossy surfaces.",
-        "Use cool greys in shadows; avoid pure black until the end.",
-      ],
-      palette: [
-        { number: "199", name: "Black", hex: "#000000" },
-        { number: "132", name: "Light Flesh", hex: "#F4C9B1" },
-        { number: "151", name: "Helio Turquoise", hex: "#5FB1C5" },
-      ],
+      const { imageUrl } = await generateAiLineArt(imageDataUrl);
+      if (!imageUrl) throw new Error("ai-lineart.ts returned no imageUrl");
+
+      setLineUrl(imageUrl);
+      setGenStatus("done");
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err?.message || "Line art generation failed.");
+      setGenStatus("error");
+    }
+  }
+
+  async function onAnalyzeColors() {
+    if (!imgRef.current) return;
+    if (genStatus !== "done") return;
+
+    setAnStatus("analyzing");
+    setErrorMsg(null);
+
+    try {
+      const colorPlan = await generateColorPlan(imgRef.current, fileName);
+      setPlan(colorPlan);
+      setAnStatus("done");
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err?.message || "Color analysis failed.");
+      setAnStatus("error");
+    }
+  }
+
+  function onPrintPdf() {
+    if (!lineUrl) return;
+
+    const printablePlan = plan ? buildPrintableFromPlan(plan, kit) : undefined;
+
+    openPrintView({
+      lineArtDataUrl: lineUrl,
+      originalDataUrl: sourceDataUrl,
+      fileName,
+      orientation:
+        ((plan as any)?.source?.orientation as "portrait" | "landscape") || "portrait",
+      colorPlan: printablePlan,
+      tips: tipsSuggested, // Page 2: read-only, auto-suggested tips
     });
-    doc.save("coloring-page.pdf");
-  };
+  }
+
+  function onDownloadPdf() {
+    alert("Use “Print / Save as PDF” and choose Destination: Save as PDF.");
+  }
+
+  function onReset() {
+    setFileName(undefined);
+    setSourceUrl(undefined);
+    setSourceDataUrl(undefined);
+    setLineUrl(undefined);
+    setPlan(null);
+    setGenStatus("idle");
+    setAnStatus("idle");
+    setErrorMsg(null);
+  }
+
+  /* ======================
+     SECTION D: render
+     ====================== */
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <header className="px-6 py-5 border-b border-slate-800">
-        <h1 className="text-3xl font-semibold">Andy’s Coloring Book Maker</h1>
-        <p className="text-slate-400 mt-1">
-          Upload a photo → generate clean line art for printable coloring pages.
-        </p>
-      </header>
+    <main className="min-h-screen bg-slate-100 text-slate-900">
+      <div className="max-w-6xl mx-auto p-4">
+        <header className="mb-3">
+          <h1 className="text-xl font-bold">AKP Coloring Book</h1>
+          <p className="text-xs text-slate-600">
+            Upload a photo → generate clean line art → analyze colors → print.
+          </p>
+        </header>
 
-      <main className="p-6 space-y-6 max-w-7xl mx-auto">
-        {/* Controls */}
-        <div className="flex items-center gap-3">
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <label className="inline-flex items-center gap-2 px-3 py-2 border rounded-md bg-white cursor-pointer">
+            <input type="file" accept="image/*" className="hidden" onChange={onChoosePhoto} />
+            <span>Choose Photo</span>
+          </label>
+
           <button
-            className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600"
-            onClick={onPick}
-            disabled={state.busy}
+            onClick={onGenerateLineArt}
+            disabled={!sourceUrl || genStatus === "generating"}
+            className="px-3 py-2 rounded-md bg-indigo-600 text-white disabled:opacity-50"
           >
-            Choose Photo
+            {genStatus === "generating" ? "Generating…" : "Generate Line Art"}
           </button>
 
           <button
-            className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600"
-            onClick={onReset}
-            disabled={state.busy}
+            onClick={onAnalyzeColors}
+            disabled={!sourceUrl || genStatus !== "done" || anStatus === "analyzing"}
+            className="px-3 py-2 rounded-md bg-emerald-600 text-white disabled:opacity-50"
+            title={genStatus !== "done" ? "Run line art first" : "Re-run color analysis"}
           >
-            Reset
+            {anStatus === "analyzing" ? "Analyzing…" : "Analyze Colors"}
           </button>
 
-          {/* NEW: Download PDF button */}
           <button
-            className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50"
+            className="px-3 py-2 rounded-md bg-white border text-slate-900 disabled:opacity-50"
+            onClick={onPrintPdf}
+            disabled={!lineUrl}
+            title="Opens the print dialog; choose 'Save as PDF' to save."
+          >
+            Print / Save as PDF
+          </button>
+
+          <button
             onClick={onDownloadPdf}
-            disabled={!state.originalDataUrl || !state.lineArtUrl || state.busy}
-            title={!state.lineArtUrl ? "Generate line art first" : "Download PDF"}
+            className="px-3 py-2 rounded-md bg-slate-800 text-white disabled:opacity-50"
+            disabled={!sourceUrl || !lineUrl}
           >
             Download PDF
           </button>
 
-          <button
-            className="ml-auto px-5 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
-            onClick={onGenerate}
-            disabled={!state.originalDataUrl || state.busy}
-          >
-            {state.busy ? "Generating…" : "Generate Line Art"}
+          <button onClick={onReset} className="px-3 py-2 rounded-md bg-white border">
+            Reset
           </button>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={onFile}
-          />
         </div>
 
-        {/* Preview panels */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <section className="bg-slate-800 rounded-xl p-4">
-            <h2 className="text-xl font-semibold mb-3">Original</h2>
-            <div className="aspect-video bg-slate-900/50 rounded-lg flex items-center justify-center">
-              {state.originalDataUrl ? (
-                <img
-                  src={state.originalDataUrl}
-                  alt="original"
-                  className="w-full h-full object-contain rounded-md"
-                />
-              ) : (
-                <span className="text-slate-500">Pick an image to begin</span>
-              )}
-            </div>
-          </section>
-
-          <section className="bg-slate-800 rounded-xl p-4">
-            <h2 className="text-xl font-semibold mb-3">Line Art (AI)</h2>
-            <div className="aspect-video bg-slate-900/50 rounded-lg flex items-center justify-center">
-              {state.lineArtUrl ? (
-                <img
-                  src={state.lineArtUrl}
-                  alt="line art"
-                  className="w-full h-full object-contain rounded-md"
-                />
-              ) : (
-                <span className="text-slate-500">
-                  {state.busy ? "Generating…" : "No line art yet"}
-                </span>
-              )}
-            </div>
-          </section>
-        </div>
-
-        {state.error && (
-          <div className="rounded-md bg-rose-900/40 border border-rose-700 text-rose-200 p-3">
-            Error: {state.error}
+        {/* Error banner */}
+        {errorMsg && (
+          <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-100 rounded-md p-2">
+            {errorMsg}
           </div>
         )}
 
-        <p className="text-sm text-slate-500">
-          Line art is generated by a hosted AI model for high-quality, print-ready output.
-        </p>
-      </main>
+        {/* Layout */}
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+          {/* Left: Original */}
+          <div className="rounded-xl bg-white border shadow-sm p-3">
+            <h2 className="text-sm font-semibold mb-2">Original</h2>
+            {sourceUrl ? (
+              <img
+                ref={imgRef}
+                src={sourceUrl}
+                alt="Original"
+                className="max-h-[70vh] w-full object-contain rounded-md border bg-white"
+              />
+            ) : (
+              <Placeholder />
+            )}
+          </div>
+
+          {/* Middle: Line Art */}
+          <div className="rounded-xl bg-white border shadow-sm p-3">
+            <h2 className="text-sm font-semibold mb-2">Line Art (AI)</h2>
+            {lineUrl ? (
+              <img
+                src={lineUrl}
+                alt="AI line art"
+                className="max-h-[70vh] w-full object-contain rounded-md border bg-white"
+              />
+            ) : (
+              <Placeholder />
+            )}
+          </div>
+
+          {/* Right: Color Plan + Tips */}
+          <div className="space-y-4">
+            <div className="rounded-xl bg-white shadow-sm p-3">
+              <h2 className="text-sm font-semibold mb-2">Color Plan</h2>
+              {plan ? (
+                <ColorPlanPanel
+                  plan={plan}
+                  defaultKitSize={KitSize.K12}
+                  showConfidence={true}
+                />
+              ) : (
+                <div className="text-xs text-slate-600">
+                  Run “Analyze Colors” after generating line art.
+                </div>
+              )}
+            </div>
+
+            {plan ? <TipsPanel tips={tipsSuggested} /> : null}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+/* ======================
+   SECTION E: helpers
+   ====================== */
+
+function Placeholder() {
+  return (
+    <div className="h-[200px] grid place-items-center text-sm text-gray-500 border rounded-md bg-gray-50">
+      Choose a photo to begin.
     </div>
   );
+}
+
+/** Downscale an IMG to a DataURL for API consumption. */
+function imageToDataUrl(imgEl: HTMLImageElement, maxDim = 1600): string {
+  const w = imgEl.naturalWidth || imgEl.width;
+  const h = imgEl.naturalHeight || imgEl.height;
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  const cw = Math.round(w * scale);
+  const ch = Math.round(h * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.drawImage(imgEl, 0, 0, cw, ch);
+  return canvas.toDataURL("image/png");
+}
+
+/** Build printable rows (same selection as panel) + de-dupe identical pencils. */
+function buildPrintableFromPlan(
+  plan: ColorPlan,
+  kit: KitSize
+): import("@/print").PrintableColorPlan {
+  const clusterById = new Map<number, ColorCluster>();
+  for (const c of plan.clusters) clusterById.set(c.id, c);
+
+  const priorityIds = plan.priorityOrder?.length
+    ? plan.priorityOrder
+    : plan.clusters.map((c) => c.id);
+
+  const visible: ColorCluster[] = [];
+  for (const id of priorityIds) {
+    const c = clusterById.get(id);
+    if (!c) continue;
+    visible.push(c);
+    if (visible.length >= Number(kit)) break;
+  }
+
+  const rawRows = visible.map((c, i) => {
+    const matchesByKit = (c as any).matchesByKit as
+      | Record<
+          string | number,
+          { fcId?: number; fcNo?: number; name?: string; label?: string; pencilName?: string; hex?: string; deltaE00?: number }
+        >
+      | undefined;
+
+    const m = (matchesByKit?.[kit] ?? matchesByKit?.[String(kit)] ?? c.matched) as any;
+
+    const hex = m?.hex || (c as any).sampleHex || "#FFFFFF";
+    const fcNo = m?.fcId != null ? String(m.fcId) : m?.fcNo != null ? String(m.fcNo) : "";
+    const name =
+      (typeof m?.name === "string" && m.name) ||
+      (typeof m?.label === "string" && m.label) ||
+      (typeof m?.pencilName === "string" && m.pencilName) ||
+      (typeof (c as any)?.name === "string" && (c as any).name) ||
+      "";
+    const coveragePct = (c.coverage ?? 0) * 100;
+    const deltaE = typeof m?.deltaE00 === "number" ? m.deltaE00 : undefined;
+
+    return { idx: i + 1, hex, fcNo, name, coveragePct, deltaE };
+  });
+
+  const rows = dedupeRows(rawRows);
+
+  // footer notes
+  const paletteNote = `Palette: ${plan.paletteMeta.set} · ${plan.paletteMeta.count} swatches · v${plan.paletteMeta.version}`;
+  let qaAvg = 0, qaWorst = 0, wsum = 0;
+  for (const r of rows) {
+    const w = (r.coveragePct ?? 0) / 100;
+    const d = r.deltaE ?? 0;
+    qaAvg += w * d;
+    wsum += w;
+    qaWorst = Math.max(qaWorst, d);
+  }
+  const avg = wsum > 0 ? qaAvg / wsum : 0;
+  const metricsNote = `QA · Kit ${Number(kit)} — Avg ΔE (area-weighted): ${avg.toFixed(1)} · Worst: ${qaWorst.toFixed(1)}`;
+
+  return { kitLabel: `${Number(kit)} pencils`, rows, paletteNote, metricsNote };
+}
+
+function dedupeRows(
+  rows: Array<{
+    idx: number;
+    hex?: string;
+    fcNo?: string;
+    name?: string;
+    coveragePct?: number;
+    deltaE?: number;
+  }>
+) {
+  const out: typeof rows = [];
+  const where = new Map<string, number>();
+
+  for (const r of rows) {
+    const key =
+      r.fcNo && r.fcNo.trim()
+        ? `fc:${r.fcNo.trim()}`
+        : `hex:${(r.hex || "").toLowerCase()}|name:${(r.name || "").toLowerCase()}`;
+
+    const j = where.get(key);
+    if (j == null) {
+      where.set(key, out.length);
+      out.push({ ...r });
+    } else {
+      const t = out[j];
+      const cov1 = t.coveragePct ?? 0;
+      const cov2 = r.coveragePct ?? 0;
+      const w1 = cov1 / 100;
+      const w2 = cov2 / 100;
+      const d1 = t.deltaE ?? 0;
+      const d2 = r.deltaE ?? 0;
+
+      t.coveragePct = cov1 + cov2;
+      const wSum = w1 + w2;
+      t.deltaE = wSum > 0 ? (w1 * d1 + w2 * d2) / wSum : t.deltaE;
+    }
+  }
+  out.forEach((r, i) => (r.idx = i + 1));
+  return out;
 }
