@@ -1,6 +1,7 @@
 // src/print/index.tsx
-// Print via hidden iframe (no popup). Pages:
-// 1) Line art  2) Reference photo (small) + Color Plan  3) Tips
+// Print via hidden iframe (no popup).
+// Normal: 3 pages -> (1) Line art  (2) Reference + Color Plan  (3) Tips
+// If table is long, auto-switch to 4 pages -> (3) Color Plan only  (4) Tips
 
 export type PrintableRow = {
   idx: number;
@@ -29,11 +30,11 @@ export type Tip = {
 
 type OpenPrintViewParams = {
   lineArtDataUrl: string;                      // REQUIRED
-  originalDataUrl?: string;                    // small ref image on page 2
+  originalDataUrl?: string;                    // small ref image
   fileName?: string;                           // title on page 1
   orientation?: "portrait" | "landscape";      // all pages same
-  colorPlan?: PrintableColorPlan;              // page 2 table
-  tips?: Tip[];                                // page 3 tips
+  colorPlan?: PrintableColorPlan;              // table
+  tips?: Tip[];                                // tips
 };
 
 export function openPrintView({
@@ -44,6 +45,7 @@ export function openPrintView({
   colorPlan,
   tips = [],
 }: OpenPrintViewParams) {
+  // Remove any prior print iframe
   const EXISTING_ID = "akp-print-iframe";
   const old = document.getElementById(EXISTING_ID);
   if (old && old.parentElement) old.parentElement.removeChild(old);
@@ -66,7 +68,15 @@ export function openPrintView({
   const headerTitle = safeTitle || "New Color Chart";
   const dateStr = new Date().toLocaleString();
 
-  const tableRowsHtml = (colorPlan?.rows || [])
+  const rows = colorPlan?.rows ?? [];
+  const rowCount = rows.length;
+
+  // Rough capacity thresholds (12px text, 18mm margins, our paddings):
+  // Portrait can show ≈18–20 rows under the photo, Landscape ≈26–28.
+  const maxRows = orientation === "landscape" ? 26 : 18;
+  const needTableOnlyPage = rowCount > maxRows;
+
+  const tableRowsHtml = rows
     .map((r) => {
       const sw = r.hex
         ? `<span class="sw" style="background:${r.hex}"></span>`
@@ -101,55 +111,8 @@ export function openPrintView({
     })
     .join("");
 
-  const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeHtml(headerTitle)} — New Color Chart</title>
-  <style>
-    :root { --fg:#0f172a; --muted:#64748b; --line:#e2e8f0; }
-    @page { size: ${orientation} ; margin: 18mm; }
-    * { box-sizing: border-box; }
-    html, body { background:#fff; color:var(--fg); font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
-    h1,h2,h3 { margin:0 0 6px 0; }
-    .muted { color: var(--muted); }
-
-    .page { page-break-after: always; }
-    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8mm; }
-    .header .right { text-align:right; color:var(--muted); font-size:11px; }
-    .footer { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; margin-top:6mm; }
-
-    /* PAGE 1: Line art */
-    .lineart { width:100%; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
-    .lineart img { display:block; width:100%; height:auto; }
-
-    /* PAGE 2: Reference (small) + table */
-    .refimg { border:1px solid var(--line); border-radius:6px; padding:4px; margin-bottom:8mm; display:flex; justify-content:center; }
-    .refimg img { height:60mm; width:auto; display:block; border-radius:4px; }
-
-    table { width:100%; border-collapse:collapse; }
-    thead th { text-align:left; font-weight:600; font-size:12px; border-bottom:1px solid var(--line); padding:6px 4px; }
-    tbody td { padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:middle; }
-    table, thead, tbody, tr, td, th { page-break-inside: avoid; }
-    .col-idx { width:6mm; text-align:right; }
-    .col-color .sw { display:inline-block; width:14px; height:14px; border:1px solid var(--line); border-radius:3px; margin-right:6px; vertical-align:-3px; }
-    .col-fc { width:18mm; }
-    .col-cov { width:22mm; text-align:right; }
-    .col-de  { width:16mm; text-align:right; }
-    .name { white-space:nowrap; }
-
-    /* PAGE 3: Tips */
-    .tips h3 { margin:0 0 6px 0; }
-    .tips ol { margin:0 8px 10px 18px; }
-    .spacer { height:4mm; } /* ← tiny vertical space, like a newline */
-    .tip { border:1px solid var(--line); border-radius:6px; padding:6px; margin:0 0 6px 0; }
-    .tip-head { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
-    .tip-swatch { display:inline-block; width:12px; height:12px; border:1px solid var(--line); border-radius:2px; }
-    .tag { display:inline-block; font-size:10px; border:1px solid var(--line); padding:1px 4px; border-radius:4px; }
-  </style>
-</head>
-<body>
-
+  // Sections we will join according to the layout
+  const page1 = `
   <!-- PAGE 1: Line Art -->
   <section class="page">
     <div class="header">
@@ -168,8 +131,27 @@ export function openPrintView({
       <div class="muted">localhost:3000</div>
       <div class="muted"></div>
     </div>
-  </section>
+  </section>`;
 
+  const page2_ref_only = `
+  <!-- PAGE 2: Reference (small) -->
+  <section class="page">
+    <div class="header">
+      <div class="muted">${escapeHtml(dateStr)}</div>
+      <div class="right muted">New Color Chart</div>
+    </div>
+
+    <figure class="refimg">
+      ${originalDataUrl ? `<img id="img-original" src="${originalDataUrl}" alt="Reference"/>` : `<div class="muted">No reference image</div>`}
+    </figure>
+
+    <div class="footer">
+      <div class="muted"></div>
+      <div class="muted"></div>
+    </div>
+  </section>`;
+
+  const page2_ref_plus_table = `
   <!-- PAGE 2: Reference (small) + Color Plan -->
   <section class="page">
     <div class="header">
@@ -199,9 +181,38 @@ export function openPrintView({
       <div>${escapeHtml(colorPlan?.paletteNote || "")}</div>
       <div>${escapeHtml(colorPlan?.metricsNote || "")}</div>
     </div>
-  </section>
+  </section>`;
 
-  <!-- PAGE 3: Tips -->
+  const page3_table_only = `
+  <!-- PAGE 3: Color Plan only -->
+  <section class="page">
+    <div class="header">
+      <div class="muted">${escapeHtml(dateStr)}</div>
+      <div class="right muted">New Color Chart</div>
+    </div>
+
+    <h2>Color Plan — ${escapeHtml(colorPlan?.kitLabel || "")}</h2>
+    <table>
+      <thead>
+        <tr>
+          <th class="col-idx">#</th>
+          <th class="col-color">Color</th>
+          <th class="col-fc">FC No.</th>
+          <th class="col-cov">Coverage</th>
+          <th class="col-de">ΔE</th>
+        </tr>
+      </thead>
+      <tbody>${tableRowsHtml}</tbody>
+    </table>
+
+    <div class="footer">
+      <div>${escapeHtml(colorPlan?.paletteNote || "")}</div>
+      <div>${escapeHtml(colorPlan?.metricsNote || "")}</div>
+    </div>
+  </section>`;
+
+  const tipsPage = `
+  <!-- TIPS PAGE -->
   <section class="page">
     <div class="header">
       <div class="muted">${escapeHtml(dateStr)}</div>
@@ -219,8 +230,7 @@ export function openPrintView({
         <li>Leave tiny paper-white gaps for bright highlights—don’t try to erase them later.</li>
       </ol>
 
-      <div class="spacer"></div> <!-- tiny newline instead of a separator -->
-
+      <div class="spacer"></div>
       ${tipsHtml ? `<h3>Specific Suggestions for Your Line Art</h3>${tipsHtml}` : ``}
     </div>
 
@@ -228,29 +238,87 @@ export function openPrintView({
       <div class="muted">localhost:3000</div>
       <div class="muted"></div>
     </div>
-  </section>
+  </section>`;
 
-  <script>
-    (function () {
-      function waitForImages() {
-        var imgs = Array.from(document.images || []);
-        return Promise.all(imgs.map(function(img){
-          if (img.complete) return Promise.resolve();
-          return new Promise(function(resolve){
-            img.addEventListener('load', resolve, {once:true});
-            img.addEventListener('error', resolve, {once:true});
-          });
-        }));
-      }
-      var fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
-      Promise.all([fontsReady, waitForImages()]).then(function(){
-        setTimeout(function(){
-          window.focus();
-          window.print();
-        }, 100);
-      });
-    })();
-  </script>
+  const pagesHtml = needTableOnlyPage
+    ? [page1, page2_ref_only, page3_table_only, tipsPage].join("\n")
+    : [page1, page2_ref_plus_table, tipsPage].join("\n");
+
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(headerTitle)} — New Color Chart</title>
+  <style>
+    :root { --fg:#0f172a; --muted:#64748b; --line:#e2e8f0; }
+    @page { size: ${orientation}; margin: 18mm; }
+    * { box-sizing: border-box; }
+    html, body { background:#fff; color:var(--fg); font: 12px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
+    h1,h2,h3 { margin:0 0 6px 0; }
+    .muted { color: var(--muted); }
+
+    .page { page-break-after: always; }
+    .page:last-of-type { page-break-after: auto; } /* never leave a trailing blank */
+
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8mm; }
+    .header .right { text-align:right; color:var(--muted); font-size:11px; }
+    .footer { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; margin-top:6mm; }
+
+    /* PAGE 1: Line art */
+    .lineart { width:100%; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+    .lineart img { display:block; width:100%; height:auto; }
+
+    /* Reference image (small) */
+    .refimg { border:1px solid var(--line); border-radius:6px; padding:4px; margin-bottom:8mm; display:flex; justify-content:center; break-inside: avoid; }
+    .refimg img { height:60mm; width:auto; display:block; border-radius:4px; }
+
+    /* Table */
+    table { width:100%; border-collapse:collapse; }
+    thead th { text-align:left; font-weight:600; font-size:12px; border-bottom:1px solid var(--line); padding:6px 4px; }
+    tbody td { padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:middle; }
+    table, thead, tbody, tr, td, th { page-break-inside: avoid; break-inside: avoid; }
+    .col-idx { width:6mm; text-align:right; }
+    .col-color .sw { display:inline-block; width:14px; height:14px; border:1px solid var(--line); border-radius:3px; margin-right:6px; vertical-align:-3px; }
+    .col-fc { width:18mm; }
+    .col-cov { width:22mm; text-align:right; }
+    .col-de  { width:16mm; text-align:right; }
+    .name { white-space:nowrap; }
+
+    /* Tips */
+    .tips h3 { margin:0 0 6px 0; }
+    .tips ol { margin:0 8px 10px 18px; }
+    .spacer { height:4mm; }
+    .tip { border:1px solid var(--line); border-radius:6px; padding:6px; margin:0 0 6px 0; break-inside: avoid; }
+    .tip-head { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+    .tip-swatch { display:inline-block; width:12px; height:12px; border:1px solid var(--line); border-radius:2px; }
+    .tag { display:inline-block; font-size:10px; border:1px solid var(--line); padding:1px 4px; border-radius:4px; }
+  </style>
+</head>
+<body>
+
+${pagesHtml}
+
+<script>
+  (function () {
+    function waitForImages() {
+      var imgs = Array.from(document.images || []);
+      return Promise.all(imgs.map(function(img){
+        if (img.complete) return Promise.resolve();
+        return new Promise(function(resolve){
+          img.addEventListener('load', resolve, {once:true});
+          img.addEventListener('error', resolve, {once:true});
+        });
+      }));
+    }
+    var fontsReady = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
+    Promise.all([fontsReady, waitForImages()]).then(function(){
+      setTimeout(function(){
+        window.focus();
+        window.print();
+      }, 100);
+    });
+  })();
+</script>
 
 </body>
 </html>`;
