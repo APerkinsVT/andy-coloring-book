@@ -1,96 +1,118 @@
-// api/ai-lineart.ts
-// Use Replicate SDK to send a Blob directly to the model (no separate Files API call)
+// src/services/aiLineart.ts
+// Uploads a compressed image to Vercel Blob from the browser,
+// then calls /api/ai-lineart-url with { imageUrl }.
+// Keeps the same exported function signature used by App.tsx.
+//
+// Requires: npm i @vercel/blob
+// Docs ref: "Client Uploads with Vercel Blob" (Other frameworks) — handleUpload + upload()
+// https://vercel.com/docs/vercel-blob/client-upload
 
-export const config = { runtime: "nodejs" };
+import { upload } from '@vercel/blob/client';
 
-import Replicate from "replicate";
+export async function generateAiLineArt(
+  imageDataUrl: string,
+  prompt?: string
+): Promise<{ imageUrl: string; raw?: any }> {
+  // 1) Downscale/compress aggressively (fast UX + lower storage)
+  const { blob, width, height, bytes } = await downscaleToBlob(imageDataUrl, {
+    maxDim: 1400, // plenty for lineart extraction
+    quality: 0.8,
+    mime: 'image/jpeg',
+  });
 
-type Incoming = { imageDataUrl: string; prompt?: string };
+  console.log(`[ai-lineart] client compressed: ${width}×${height}, ~${prettyBytes(bytes)}`);
 
-function parseBody(req: any): Promise<Incoming | null> {
-  return new Promise(async (resolve) => {
-    try {
-      if (typeof req.body === "string") {
-        try { return resolve(JSON.parse(req.body)); } catch {}
-      } else if (req.body && typeof req.body === "object") {
-        return resolve(req.body);
-      }
-      const chunks: Uint8Array[] = [];
-      for await (const c of req) chunks.push(c as Uint8Array);
-      try { return resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8"))); } catch {}
-    } catch {}
-    resolve(null);
+  // 2) Upload directly from the browser to Vercel Blob (no server 413s)
+  //    The /api/blob-upload route issues a token securely.
+  const filename = `original-${Date.now()}.jpg`;
+  const put = await upload(filename, blob, {
+    access: 'public',
+    handleUploadUrl: '/api/blob-upload',
+  });
+
+  // put.url is the public Blob URL we’ll process on the server.
+  // 3) Call the small wrapper that converts URL -> dataURL -> your existing /api/ai-lineart
+  const r = await fetch('/api/ai-lineart-url', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ imageUrl: put.url, prompt }),
+  });
+
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    const txt = await r.text();
+    throw new Error(`AI line art failed: ${r.status} ${r.statusText} – ${txt.slice(0, 200)}`);
+  }
+  const json = await r.json();
+  if (!r.ok) {
+    console.error('AI line art server error:', json);
+    throw new Error(`AI line art failed: ${r.status} – ${json?.error ?? 'Unknown error'}`);
+  }
+  if (!json?.imageUrl) {
+    console.warn('No parsed imageUrl from server. Raw payload:', json);
+    throw new Error('AI line art succeeded but no imageUrl parsed.');
+  }
+  return { imageUrl: json.imageUrl as string, raw: json.raw };
+}
+
+/* ── helpers ─────────────────────────────────────────── */
+
+type DownscaleOpts = {
+  maxDim: number;
+  quality: number; // 0..1
+  mime?: 'image/jpeg' | 'image/webp' | 'image/png';
+};
+
+async function downscaleToBlob(
+  dataUrl: string,
+  { maxDim, quality, mime = 'image/jpeg' }: DownscaleOpts
+): Promise<{ blob: Blob; width: number; height: number; bytes: number }> {
+  const img = await loadImage(dataUrl);
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('Canvas 2D context unavailable');
+
+  if (mime === 'image/jpeg') {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h); // avoid JPEG transparent-to-black
+  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const blob = await canvasToBlob(c, mime, clamp01(quality));
+  const bytes = blob.size;
+  return { blob, width: w, height: h, bytes };
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, mime: string, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), mime, quality);
   });
 }
 
-function dataUrlToBlob(dataUrl: string): { mime: string; blob: Blob } {
-  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || "");
-  if (!m) throw new Error("Invalid or missing data URL");
-  const mime = m[1];
-  const buf = Buffer.from(m[2], "base64");
-  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength); // ArrayBuffer, not SharedArrayBuffer
-  const blob = new Blob([ab], { type: mime });
-  return { mime, blob };
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img as HTMLImageElement);
+    img.onerror = (e) => reject(e);
+    img.src = dataUrl;
+  });
 }
 
-function extractUrl(output: any): string | null {
-  // Replicate SDK often returns a "file" object with .url() OR a URL string/array
-  if (!output) return null;
-  if (typeof output === "string") return output;
-
-  // Sometimes it's an array (e.g., multiple images)
-  if (Array.isArray(output) && output.length) {
-    const first = output[0];
-    if (typeof first === "string") return first;
-    if (first && typeof first.url === "function") return first.url();
-    if (first && typeof first.url === "string") return first.url;
-  }
-
-  // Single file-like object
-  if (typeof output.url === "function") return output.url();
-  if (typeof output.url === "string") return output.url;
-
-  return null;
+function clamp01(x: number) {
+  return Math.max(0, Math.min(1, x));
 }
 
-export default async function handler(req: any, res: any) {
-  try {
-    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-
-    const token = process.env.REPLICATE_API_TOKEN;
-    if (!token) return res.status(500).json({ error: "Missing REPLICATE_API_TOKEN" });
-
-    const body = await parseBody(req);
-    if (!body?.imageDataUrl) return res.status(400).json({ error: "Missing imageDataUrl" });
-
-    const { blob } = dataUrlToBlob(body.imageDataUrl);
-
-    const replicate = new Replicate({ auth: token });
-
-    const prompt =
-      body.prompt ??
-      "Generate a clean black-and-white line drawing of the subject for a printable coloring book page. Clear edges, minimal artifacts.";
-
-    // Run the model with Blob directly — SDK uploads under the hood.
-    const output: any = await replicate.run("google/nano-banana", {
-      input: {
-        prompt,
-        image_input: [blob],
-        output_format: "png",
-      },
-    });
-
-    const imageUrl = extractUrl(output);
-    if (!imageUrl) {
-      return res.status(500).json({
-        error: "Model returned no URL",
-        debug: typeof output === "object" ? output : String(output),
-      });
-    }
-
-    res.status(200).json({ imageUrl });
-  } catch (e: any) {
-    console.error("ai-lineart error:", e);
-    res.status(500).json({ error: e?.message ?? String(e) });
-  }
+function prettyBytes(n: number) {
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let v = n, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(1)} ${u[i]}`;
 }
