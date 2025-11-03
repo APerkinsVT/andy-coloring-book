@@ -1,6 +1,6 @@
-// api/ai-lineart-from-url.ts
-// Node runtime wrapper: fetch image by URL, convert to data URL,
-// then call your existing /api/ai-lineart with a small JSON body.
+// api/ai-lineart-via-url.ts
+// Node wrapper: fetch Blob URL server-side, convert to dataURL,
+// then call your existing /api/ai-lineart (unchanged).
 
 export const config = { runtime: 'nodejs' };
 
@@ -11,15 +11,17 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { imageUrl, prompt } = (req.body || {}) as {
-      imageUrl?: string;
-      prompt?: string;
-    };
+    const { imageUrl, prompt } = (req.body || {}) as { imageUrl?: string; prompt?: string };
     if (!imageUrl) return res.status(400).json({ error: 'Missing imageUrl' });
 
     const imgRes = await fetch(imageUrl, { cache: 'no-store' });
     if (!imgRes.ok) {
-      return res.status(400).json({ error: `Failed to fetch image (${imgRes.status})` });
+      const txt = await imgRes.text().catch(() => '');
+      return res.status(400).json({
+        error: 'Failed to fetch image',
+        status: imgRes.status,
+        preview: txt.slice(0, 200),
+      });
     }
 
     const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
@@ -27,10 +29,10 @@ export default async function handler(req: any, res: any) {
     const b64 = Buffer.from(ab).toString('base64');
     const dataUrl = `data:${contentType};base64,${b64}`;
 
-    // Compute origin behind Vercel proxy
-    const xfProto = (req.headers['x-forwarded-proto'] as string) || 'https';
-    const xfHost  = (req.headers['x-forwarded-host']  as string) || req.headers.host;
-    const origin  = xfHost && xfProto ? `${xfProto}://${xfHost}` : `https://${req.headers.host}`;
+    // Build absolute origin to call your existing /api/ai-lineart
+    const proto = (req.headers['x-forwarded-proto'] as string) || 'http';
+    const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || 'localhost:3000';
+    const origin = `${proto}://${host}`;
 
     const r = await fetch(`${origin}/api/ai-lineart`, {
       method: 'POST',
@@ -44,13 +46,13 @@ export default async function handler(req: any, res: any) {
       return res.status(502).json({
         error: 'ai-lineart returned non-JSON',
         status: r.status,
-        preview: txt.slice(0, 200),
+        preview: txt.slice(0, 500),
       });
     }
 
     const out = await r.json();
     return res.status(r.status).json(out);
   } catch (err: any) {
-    return res.status(500).json({ error: err?.message || 'Unexpected error in ai-lineart-from-url' });
+    return res.status(500).json({ error: err?.message || 'Unexpected error in ai-lineart-via-url' });
   }
 }

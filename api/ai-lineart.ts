@@ -1,13 +1,5 @@
 // src/services/aiLineart.ts
-// Uploads a compressed image to Vercel Blob from the browser,
-// then calls /api/ai-lineart-from-url with { imageUrl }.
-// Keeps the same exported function signature used by App.tsx.
-//
-// Requires: npm i @vercel/blob
-// Docs ref: "Client Uploads with Vercel Blob" (Other frameworks) — handleUpload + upload()
-// https://vercel.com/docs/vercel-blob/client-upload
-
-export const config = { runtime: 'nodejs' };
+// Browser flow: upload original image to Vercel Blob → get URL → call /api/ai-lineart-via-url.
 
 import { upload } from '@vercel/blob/client';
 
@@ -15,48 +7,40 @@ export async function generateAiLineArt(
   imageDataUrl: string,
   prompt?: string
 ): Promise<{ imageUrl: string; raw?: any }> {
-  // 1) Downscale/compress aggressively (fast UX + lower storage)
-  const { blob, width, height, bytes } = await downscaleToBlob(imageDataUrl, {
-    maxDim: 1400, // plenty for lineart extraction
-    quality: 0.8,
-    mime: 'image/jpeg',
-  });
+  // Convert dataURL to Blob (no resizing needed—Blob handles size)
+  const blob = await (await fetch(imageDataUrl)).blob();
+  const mime = blob.type || 'image/jpeg';
+  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+  const filename = `original-${Date.now()}.${ext}`;
 
-  console.log(`[ai-lineart] client compressed: ${width}×${height}, ~${prettyBytes(bytes)}`);
-
-  // 2) Upload directly from the browser to Vercel Blob (no server 413s)
-  //    The /api/blob-upload route issues a token securely.
-  const filename = `original-${Date.now()}.jpg`;
+  // 1) Direct browser → Blob upload
   const put = await upload(filename, blob, {
     access: 'public',
     handleUploadUrl: '/api/blob-upload',
   });
+  if (!put?.url) {
+    throw new Error('Upload failed: no URL returned from /api/blob-upload');
+  }
 
-  // put.url is the public Blob URL we’ll process on the server.
-  // 3) Call the small wrapper that converts URL -> dataURL -> your existing /api/ai-lineart
-  const r = await fetch('/api/ai-lineart-from-url', {
+  // 2) Tell server to use the URL and run your AI route
+  const r = await fetch('/api/ai-lineart-via-url', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ imageUrl: put.url, prompt }),
   });
 
-
   const ct = r.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {
     const txt = await r.text();
-    throw new Error(`AI line art failed: ${r.status} ${r.statusText} – ${txt.slice(0, 200)}`);
+    throw new Error(`AI wrapper failed: ${r.status} ${r.statusText} – ${txt.slice(0, 200)}`);
   }
+
   const json = await r.json();
-  if (!r.ok) {
-    console.error('AI line art server error:', json);
-    throw new Error(`AI line art failed: ${r.status} – ${json?.error ?? 'Unknown error'}`);
-  }
-  if (!json?.imageUrl) {
-    console.warn('No parsed imageUrl from server. Raw payload:', json);
-    throw new Error('AI line art succeeded but no imageUrl parsed.');
-  }
+  if (!r.ok) throw new Error(json?.error || `AI wrapper ${r.status}`);
+  if (!json?.imageUrl) throw new Error('AI wrapper succeeded but no imageUrl parsed');
   return { imageUrl: json.imageUrl as string, raw: json.raw };
 }
+
 
 /* ── helpers ─────────────────────────────────────────── */
 

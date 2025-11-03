@@ -1,138 +1,126 @@
 // src/services/aiLineart.ts
-// Aggressive downscale+compress with explicit size logs and a 1.2 MB final cap.
+// Uploads a compressed image to Vercel Blob, then calls /api/ai-lineart-from-url.
+// Adds clear console logs so we can see exactly where anything fails.
+
+import { upload } from '@vercel/blob/client';
 
 export async function generateAiLineArt(
   imageDataUrl: string,
   prompt?: string
 ): Promise<{ imageUrl: string; raw?: any }> {
-  const orig = await decodeMeta(imageDataUrl);
-  console.log(
-    `[ai-lineart] original: ${orig.width}×${orig.height}, ~${prettyBytes(orig.bytes)}`
-  );
+  try {
+    // 1) Downscale/compress a bit for faster upload
+    const { blob, width, height, bytes } = await downscaleToBlob(imageDataUrl, {
+      maxDim: 1400,
+      quality: 0.8,
+      mime: 'image/jpeg',
+    });
+    console.log(`[ai-lineart] compressed: ${width}×${height}, ~${prettyBytes(bytes)}`);
 
-  // Pass 1: 1200px @ 0.78
-  let compact = await downscale(imageDataUrl, { maxDim: 1200, quality: 0.78 });
-  let meta = await decodeMeta(compact);
-  console.log(
-    `[ai-lineart] pass1:    ${meta.width}×${meta.height}, ~${prettyBytes(meta.bytes)}`
-  );
+    // 2) Upload directly to Vercel Blob (token issued by /api/blob-upload)
+    const filename = `original-${Date.now()}.jpg`;
+    console.log(`[ai-lineart] starting blob upload → ${filename}`);
 
-  // Pass 2 if needed: 1000px @ 0.72
-  if (meta.bytes > 1_600_000) {
-    compact = await downscale(compact, { maxDim: 1000, quality: 0.72 });
-    meta = await decodeMeta(compact);
-    console.log(
-      `[ai-lineart] pass2:    ${meta.width}×${meta.height}, ~${prettyBytes(meta.bytes)}`
-    );
-  }
+    const put = await upload(filename, blob, {
+      access: 'public',
+      handleUploadUrl: '/api/blob-upload',
+    });
 
-  // Pass 3 if still large: 800px @ 0.68
-  if (meta.bytes > 1_350_000) {
-    compact = await downscale(compact, { maxDim: 800, quality: 0.68 });
-    meta = await decodeMeta(compact);
-    console.log(
-      `[ai-lineart] pass3:    ${meta.width}×${meta.height}, ~${prettyBytes(meta.bytes)}`
-    );
-  }
+    console.log('[ai-lineart] blob upload result:', put);
 
-  // Final guard
-  if (meta.bytes > 1_200_000) {
-    throw new Error(
-      `Photo too large after compression (${prettyBytes(
-        meta.bytes
-      )}). Try a smaller/cropped image.`
-    );
-  }
-
-  const r = await fetch("/api/ai-lineart-from-url", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ imageDataUrl: compact, prompt }),
-  });
-
-  const ct = r.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) {
-    const txt = await r.text();
-    if (r.status === 413) {
-      throw new Error(
-        `Server said 413 (too large). Sent ~${prettyBytes(meta.bytes)}.`
-      );
+    if (!put || !put.url) {
+      throw new Error('Upload returned no URL. Check /api/blob-upload and Vercel Blob setup.');
     }
-    throw new Error(`AI line art failed: ${r.status} ${r.statusText} – ${txt.slice(0,200)}`);
-  }
 
-  const json = await r.json();
-  if (!r.ok) {
-    console.error("AI line art server error:", json);
-    throw new Error(`AI line art failed: ${r.status} – ${json?.error ?? "Unknown error"}`);
+    // 3) Call the Node wrapper with the Blob URL
+    console.log('[ai-lineart] calling /api/ai-lineart-from-url with imageUrl:', put.url);
+
+    const r = await fetch('/api/ai-lineart-from-url', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ imageUrl: put.url, prompt }),
+    });
+
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      const txt = await r.text();
+      throw new Error(`Wrapper failed: ${r.status} ${r.statusText} – ${txt.slice(0, 200)}`);
+    }
+
+    const json = await r.json();
+    if (!r.ok) {
+      console.error('Wrapper error payload:', json);
+      throw new Error(`Wrapper failed: ${r.status} – ${json?.error ?? 'Unknown error'}`);
+    }
+
+    if (!json?.imageUrl) {
+      console.warn('Wrapper succeeded but no imageUrl in payload. Raw:', json);
+      throw new Error('Wrapper succeeded but no imageUrl parsed.');
+    }
+
+    console.log('[ai-lineart] SUCCESS. lineArt URL:', json.imageUrl);
+    return { imageUrl: json.imageUrl as string, raw: json.raw };
+  } catch (err) {
+    console.error('[ai-lineart] generateAiLineArt error:', err);
+    throw err;
   }
-  if (!json?.imageUrl) {
-    console.warn("No parsed imageUrl from server. Raw payload:", json);
-    throw new Error("AI line art succeeded but no imageUrl parsed.");
-  }
-  return { imageUrl: json.imageUrl as string, raw: json.raw };
 }
 
 /* ── helpers ─────────────────────────────────────────── */
 
-async function downscale(
-  srcDataUrl: string,
-  opts: { maxDim: number; quality: number; mime?: "image/jpeg" | "image/webp" }
-): Promise<string> {
-  const { maxDim, quality, mime = "image/jpeg" } = opts;
-  const img = await loadImage(srcDataUrl);
+type DownscaleOpts = {
+  maxDim: number;
+  quality: number;
+  mime?: 'image/jpeg' | 'image/webp' | 'image/png';
+};
 
+async function downscaleToBlob(
+  dataUrl: string,
+  { maxDim, quality, mime = 'image/jpeg' }: DownscaleOpts
+): Promise<{ blob: Blob; width: number; height: number; bytes: number }> {
+  const img = await loadImage(dataUrl);
   const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
   const w = Math.max(1, Math.round(img.width * scale));
   const h = Math.max(1, Math.round(img.height * scale));
 
-  const c = document.createElement("canvas");
+  const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  const ctx = c.getContext("2d", { alpha: false });
-  if (!ctx) return srcDataUrl;
+  const ctx = c.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('Canvas 2D context unavailable');
 
-  if (mime === "image/jpeg") {
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, w, h); // avoid black in JPEG
+  if (mime === 'image/jpeg') {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
   }
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, 0, w, h);
 
-  return c.toDataURL(mime, clamp01(quality)) || srcDataUrl;
+  const blob = await canvasToBlob(c, mime, clamp01(quality));
+  return { blob, width: w, height: h, bytes: blob.size };
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, mime: string, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), mime, quality);
+  });
 }
 
 function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img as HTMLImageElement);
-    img.onerror = reject;
+    img.onerror = (e) => reject(e);
     img.src = dataUrl;
   });
 }
 
-async function decodeMeta(dataUrl: string): Promise<{width:number;height:number;bytes:number;}> {
-  const bytes = estimateDataUrlBytes(dataUrl);
-  const img = await loadImage(dataUrl);
-  return { width: img.width, height: img.height, bytes };
-}
-
-function estimateDataUrlBytes(dataUrl: string): number {
-  const m = dataUrl.match(/^data:[^;]+;base64,([A-Za-z0-9+/=]+)$/);
-  if (!m) return -1;
-  const b64 = m[1];
-  const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
-  return (b64.length * 3) / 4 - padding;
-}
+function clamp01(x: number) { return Math.max(0, Math.min(1, x)); }
 
 function prettyBytes(n: number) {
-  if (n < 0) return "unknown";
-  const u = ["B", "KB", "MB", "GB"];
+  const u = ['B', 'KB', 'MB', 'GB'];
   let v = n, i = 0;
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
   return `${v.toFixed(1)} ${u[i]}`;
 }
-function clamp01(x: number) { return Math.max(0, Math.min(1, x)); }
-
-
