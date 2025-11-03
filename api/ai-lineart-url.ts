@@ -1,64 +1,69 @@
 // api/ai-lineart-url.ts
-// Accepts { imageUrl, prompt }, downloads the image from Blob,
-// converts it to a data URL server-side, then calls your existing /api/ai-lineart.
+// Node runtime wrapper:
+// Accepts { imageUrl, prompt }, downloads the image server-side,
+// converts it to a data URL (Buffer → base64), then calls your existing /api/ai-lineart.
 
-export const config = { runtime: 'edge' };
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-export async function POST(request: Request): Promise<Response> {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
-    const { imageUrl, prompt } = await request.json() as { imageUrl?: string; prompt?: string };
+    const { imageUrl, prompt } = (req.body || {}) as {
+      imageUrl?: string;
+      prompt?: string;
+    };
 
     if (!imageUrl) {
-      return json({ error: 'Missing imageUrl' }, 400);
+      return res.status(400).json({ error: "Missing imageUrl" });
     }
 
-    const imgRes = await fetch(imageUrl, { cache: 'no-store' });
+    // Fetch the original image from Blob (or any public URL)
+    const imgRes = await fetch(imageUrl, { cache: "no-store" });
     if (!imgRes.ok) {
-      return json({ error: `Failed to fetch image (${imgRes.status})` }, 400);
+      return res
+        .status(400)
+        .json({ error: `Failed to fetch image (${imgRes.status})` });
     }
 
-    const ct = imgRes.headers.get('content-type') || 'image/jpeg';
-    const buf = new Uint8Array(await imgRes.arrayBuffer());
-    const b64 = uint8ToBase64(buf);
-    const dataUrl = `data:${ct};base64,${b64}`;
+    const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+    const ab = await imgRes.arrayBuffer();
+    const b64 = Buffer.from(ab).toString("base64");
+    const dataUrl = `data:${contentType};base64,${b64}`;
 
-    // Call the original endpoint with a small JSON body (no more 413s).
-    const origin = new URL(request.url).origin;
+    // Compute origin for internal call to your existing /api/ai-lineart
+    const xfProto = (req.headers["x-forwarded-proto"] as string) || "https";
+    const xfHost = (req.headers["x-forwarded-host"] as string) || req.headers.host;
+    const origin =
+      xfHost && xfProto ? `${xfProto}://${xfHost}` : `https://${req.headers.host}`;
+
+    // Call your existing endpoint with a small JSON body (no 413 now)
     const r = await fetch(`${origin}/api/ai-lineart`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ imageDataUrl: dataUrl, prompt }),
     });
 
-    const ct2 = r.headers.get('content-type') || '';
-    if (!ct2.includes('application/json')) {
+    const ct2 = r.headers.get("content-type") || "";
+    if (!ct2.includes("application/json")) {
       const txt = await r.text();
-      return json({ error: 'ai-lineart returned non-JSON', status: r.status, preview: txt.slice(0, 200) }, 502);
+      return res
+        .status(502)
+        .json({
+          error: "ai-lineart returned non-JSON",
+          status: r.status,
+          preview: txt.slice(0, 200),
+        });
     }
 
     const jsonOut = await r.json();
-    return json(jsonOut, r.status);
+    return res.status(r.status).json(jsonOut);
   } catch (err: any) {
-    return json({ error: err?.message || 'Unexpected error' }, 500);
+    return res
+      .status(500)
+      .json({ error: err?.message || "Unexpected error in ai-lineart-url" });
   }
-}
-
-/* ─ helpers ─ */
-
-function uint8ToBase64(u8: Uint8Array): string {
-  // Edge runtime provides btoa; encode in manageable chunks
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < u8.length; i += chunk) {
-    binary += String.fromCharCode(...u8.subarray(i, i + chunk) as any);
-  }
-  // eslint-disable-next-line no-undef
-  return btoa(binary);
-}
-
-function json(obj: any, status = 200): Response {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
 }
