@@ -3,7 +3,8 @@
 // then calls your existing /api/ai-lineart with a small JSON body.
 
 // api/ai-lineart-url.ts
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+export const config = { runtime: 'nodejs18.x' }; // or 'nodejs20.x' if your project uses 20
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {

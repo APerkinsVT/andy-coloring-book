@@ -9,6 +9,8 @@
 
 import { upload } from '@vercel/blob/client';
 
+export const config = { runtime: 'nodejs18.x' };
+
 export async function generateAiLineArt(
   imageDataUrl: string,
   prompt?: string
