@@ -2,6 +2,7 @@
 // Node runtime wrapper: fetches image by URL, converts to data URL,
 // then calls your existing /api/ai-lineart with a small JSON body.
 
+// api/ai-lineart-url.ts
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

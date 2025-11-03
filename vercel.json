@@ -1,8 +1,8 @@
 {
+  "version": 2,
   "functions": {
     "api/ai-lineart-url.ts": { "runtime": "nodejs18.x" },
     "api/ai-lineart.ts":     { "runtime": "nodejs18.x" },
     "api/blob-upload.ts":    { "runtime": "edge" }
   }
 }
-
