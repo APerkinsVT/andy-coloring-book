@@ -1,20 +1,18 @@
 // api/blob-upload.ts
 // Node runtime token endpoint for Vercel Blob client uploads.
-// We adapt the Node req/res into a Fetch Request for handleUpload.
+// We adapt to a Fetch Request for handleUpload.
 
 export const config = { runtime: 'nodejs' };
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Body is already parsed by Vercel for JSON requests
     const body = (req.body || {}) as HandleUploadBody;
 
     // Build a Fetch-style Request so handleUpload works on Node
@@ -27,14 +25,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const json = await handleUpload({
       request,
       body,
-      onBeforeGenerateToken: async (_pathname /*, clientPayload */) => {
+      onBeforeGenerateToken: async (_pathname) => {
         return {
           allowedContentTypes: ['image/jpeg', 'image/png', 'image/webp'],
           addRandomSuffix: true,
         };
       },
-      onUploadCompleted: async ({ blob /*, tokenPayload */ }) => {
-        // Optional: keep or remove — this is fine on Node
+      onUploadCompleted: async ({ blob }) => {
+        // You can keep or remove this log; Node can log just fine.
         console.log('Blob upload completed:', blob.url);
       },
     });

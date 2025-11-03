@@ -2,11 +2,9 @@
 // Node runtime wrapper: fetch image by URL, convert to data URL,
 // then call your existing /api/ai-lineart with a small JSON body.
 
-
 export const config = { runtime: 'nodejs' };
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
@@ -29,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const b64 = Buffer.from(ab).toString('base64');
     const dataUrl = `data:${contentType};base64,${b64}`;
 
-    // Build origin for internal call to /api/ai-lineart
+    // Compute origin behind Vercel proxy
     const xfProto = (req.headers['x-forwarded-proto'] as string) || 'https';
     const xfHost  = (req.headers['x-forwarded-host']  as string) || req.headers.host;
     const origin  = xfHost && xfProto ? `${xfProto}://${xfHost}` : `https://${req.headers.host}`;
