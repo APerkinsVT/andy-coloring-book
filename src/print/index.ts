@@ -160,8 +160,8 @@ export function openPrintView({
       ${originalDataUrl ? `<img id="img-original" src="${originalDataUrl}" alt="Reference"/>` : `<div class="muted">No reference image</div>`}
     </figure>
 
-    <h2>Color Plan — ${escapeHtml(colorPlan?.kitLabel || "")}</h2>
-    <table>
+    <table class="plan">
+      <caption>Color Plan — ${escapeHtml(colorPlan?.kitLabel || "")}</caption>
       <thead>
         <tr>
           <th class="col-idx">#</th>
@@ -188,8 +188,8 @@ export function openPrintView({
       <div class="right muted">New Color Chart</div>
     </div>
 
-    <h2>Color Plan — ${escapeHtml(colorPlan?.kitLabel || "")}</h2>
-    <table>
+    <table class="plan">
+      <caption>Color Plan — ${escapeHtml(colorPlan?.kitLabel || "")}</caption>
       <thead>
         <tr>
           <th class="col-idx">#</th>
@@ -269,6 +269,14 @@ export function openPrintView({
 
     table { width:100%; border-collapse:collapse; }
     thead { display: table-header-group; }   /* repeat header when table breaks */
+    caption {
+      caption-side: top;
+      text-align: left;
+      font-weight: 600;
+      font-size: 12px;
+      padding: 0 4px 6px 4px;
+    }
+    table.plan { width:100%; border-collapse: collapse; }
     tfoot { display: table-footer-group; }   /* not used, helps engines keep footer logic */
     thead th { text-align:left; font-weight:600; font-size:12px; border-bottom:1px solid var(--line); padding:6px 4px; }
     tbody td { padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:middle; }
