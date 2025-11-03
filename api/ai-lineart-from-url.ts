@@ -3,7 +3,7 @@
 // then call your existing /api/ai-lineart with a small JSON body.
 
 
-export const config = { runtime: 'nodejs.x' };
+export const config = { runtime: 'nodejs' };
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
