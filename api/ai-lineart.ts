@@ -7,7 +7,7 @@
 // Docs ref: "Client Uploads with Vercel Blob" (Other frameworks) — handleUpload + upload()
 // https://vercel.com/docs/vercel-blob/client-upload
 
-export const config = { runtime: 'nodejs.x' };
+export const config = { runtime: 'nodejs' };
 
 import { upload } from '@vercel/blob/client';
 
