@@ -12,7 +12,7 @@ import type { Tip } from "@/types/tips";
 
 import { generateColorPlan } from "@/services/color";
 import { generateAiLineArt } from "@/services/aiLineart";
-import { openPrintView } from "@/print";
+import { openPrintView, type PrintableColorPlan } from "@/print";
 import { suggestTips } from "@/utils/suggestTips";
 
 /* ────────────────────────────────────────────────────────────────────────────

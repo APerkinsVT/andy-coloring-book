@@ -1,4 +1,4 @@
-// src/print/index.tsx
+// src/print/index.ts
 // Print via hidden iframe (no popup).
 // Normal: 3 pages -> (1) Line art  (2) Reference + Color Plan  (3) Tips
 // If table is long, auto-switch to 4 pages -> (3) Color Plan only  (4) Tips
@@ -45,7 +45,6 @@ export function openPrintView({
   colorPlan,
   tips = [],
 }: OpenPrintViewParams) {
-  // Remove any prior print iframe
   const EXISTING_ID = "akp-print-iframe";
   const old = document.getElementById(EXISTING_ID);
   if (old && old.parentElement) old.parentElement.removeChild(old);
@@ -71,8 +70,7 @@ export function openPrintView({
   const rows = colorPlan?.rows ?? [];
   const rowCount = rows.length;
 
-  // Rough capacity thresholds (12px text, 18mm margins, our paddings):
-  // Portrait can show ≈18–20 rows under the photo, Landscape ≈26–28.
+  // Portrait can show ≈18 rows under the photo, Landscape ≈26.
   const maxRows = orientation === "landscape" ? 26 : 18;
   const needTableOnlyPage = rowCount > maxRows;
 
@@ -111,7 +109,6 @@ export function openPrintView({
     })
     .join("");
 
-  // Sections we will join according to the layout
   const page1 = `
   <!-- PAGE 1: Line Art -->
   <section class="page">
@@ -258,21 +255,18 @@ export function openPrintView({
     .muted { color: var(--muted); }
 
     .page { page-break-after: always; }
-    .page:last-of-type { page-break-after: auto; } /* never leave a trailing blank */
+    .page:last-of-type { page-break-after: auto; }
 
     .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8mm; }
     .header .right { text-align:right; color:var(--muted); font-size:11px; }
     .footer { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; margin-top:6mm; }
 
-    /* PAGE 1: Line art */
     .lineart { width:100%; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
     .lineart img { display:block; width:100%; height:auto; }
 
-    /* Reference image (small) */
     .refimg { border:1px solid var(--line); border-radius:6px; padding:4px; margin-bottom:8mm; display:flex; justify-content:center; break-inside: avoid; }
     .refimg img { height:60mm; width:auto; display:block; border-radius:4px; }
 
-    /* Table */
     table { width:100%; border-collapse:collapse; }
     thead th { text-align:left; font-weight:600; font-size:12px; border-bottom:1px solid var(--line); padding:6px 4px; }
     tbody td { padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:middle; }
@@ -284,7 +278,6 @@ export function openPrintView({
     .col-de  { width:16mm; text-align:right; }
     .name { white-space:nowrap; }
 
-    /* Tips */
     .tips h3 { margin:0 0 6px 0; }
     .tips ol { margin:0 8px 10px 18px; }
     .spacer { height:4mm; }
@@ -330,8 +323,6 @@ ${pagesHtml}
   const done = () => { setTimeout(() => iframe.remove(), 1000); window.removeEventListener("focus", done); };
   window.addEventListener("focus", done);
 }
-
-/* ────────────────────────────────────────────────────────────── */
 
 function escapeHtml(s: string): string {
   return s
