@@ -72,7 +72,7 @@ export function openPrintView({
 
   // Portrait can show ≈18 rows under the photo, Landscape ≈26.
   const maxRows = orientation === "landscape" ? 26 : 18;
-  const needTableOnlyPage = rowCount > maxRows;
+  const needTableOnlyPage = true; // MVP: always give the table its own page
 
   const tableRowsHtml = rows
     .map((r) => {
@@ -268,15 +268,22 @@ export function openPrintView({
     .refimg img { height:60mm; width:auto; display:block; border-radius:4px; }
 
     table { width:100%; border-collapse:collapse; }
+    thead { display: table-header-group; }   /* repeat header when table breaks */
+    tfoot { display: table-footer-group; }   /* not used, helps engines keep footer logic */
     thead th { text-align:left; font-weight:600; font-size:12px; border-bottom:1px solid var(--line); padding:6px 4px; }
     tbody td { padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:middle; }
-    table, thead, tbody, tr, td, th { page-break-inside: avoid; break-inside: avoid; }
+
+    /* Let the TABLE itself break; just keep individual rows/cells together */
+    tr, td, th { page-break-inside: avoid; break-inside: avoid; }
+
+    /* column widths unchanged */
     .col-idx { width:6mm; text-align:right; }
     .col-color .sw { display:inline-block; width:14px; height:14px; border:1px solid var(--line); border-radius:3px; margin-right:6px; vertical-align:-3px; }
     .col-fc { width:18mm; }
     .col-cov { width:22mm; text-align:right; }
     .col-de  { width:16mm; text-align:right; }
     .name { white-space:nowrap; }
+
 
     .tips h3 { margin:0 0 6px 0; }
     .tips ol { margin:0 8px 10px 18px; }
