@@ -34,11 +34,12 @@ export async function generateAiLineArt(
 
   // put.url is the public Blob URL we’ll process on the server.
   // 3) Call the small wrapper that converts URL -> dataURL -> your existing /api/ai-lineart
-  const r = await fetch('/api/ai-lineart-url', {
+  const r = await fetch('/api/ai-lineart-from-url', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ imageUrl: put.url, prompt }),
   });
+
 
   const ct = r.headers.get('content-type') || '';
   if (!ct.includes('application/json')) {

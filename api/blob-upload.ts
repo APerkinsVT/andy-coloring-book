@@ -1,11 +1,11 @@
 // api/blob-upload.ts
-// Edge-compatible handler that issues client upload tokens for Vercel Blob.
-// Docs pattern: "Client Uploads with Vercel Blob" (Other frameworks). 
+// Edge-compatible token endpoint for Vercel Blob client uploads.
 
-export const config = { runtime: 'nodejs18.x' }; // or 'nodejs20.x'
+export const config = { runtime: 'edge' };
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
+
+export async function POST(request: Request): Promise<Response> {
   const body = (await request.json()) as HandleUploadBody;
 
   try {
@@ -13,15 +13,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       request,
       body,
       onBeforeGenerateToken: async (_pathname /*, clientPayload */) => {
-        // You could authz here if you want. For MVP allow images:
+        // MVP: allow common image types
         return {
           allowedContentTypes: ['image/jpeg', 'image/png', 'image/webp'],
           addRandomSuffix: true,
-          // tokenPayload: JSON.stringify({ uid: 'anon' }), // optional
         };
       },
       onUploadCompleted: async ({ blob /*, tokenPayload */ }) => {
-        // Optional: keep simple for MVP. You could log or update a DB.
+        // Optional: log or notify
         console.log('Blob upload completed:', blob.url);
       },
     });
