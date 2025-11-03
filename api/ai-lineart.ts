@@ -1,6 +1,6 @@
 // src/services/aiLineart.ts
 // Uploads a compressed image to Vercel Blob from the browser,
-// then calls /api/ai-lineart-url with { imageUrl }.
+// then calls /api/ai-lineart-from-url with { imageUrl }.
 // Keeps the same exported function signature used by App.tsx.
 //
 // Requires: npm i @vercel/blob
