@@ -2,11 +2,10 @@
 // Edge-compatible handler that issues client upload tokens for Vercel Blob.
 // Docs pattern: "Client Uploads with Vercel Blob" (Other frameworks). 
 
-import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
+export const config = { runtime: 'nodejs18.x' }; // or 'nodejs20.x'
 
-export const config = { runtime: 'edge' };
-
-export async function POST(request: Request): Promise<Response> {
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = (await request.json()) as HandleUploadBody;
 
   try {
