@@ -7,9 +7,9 @@
 // Docs ref: "Client Uploads with Vercel Blob" (Other frameworks) — handleUpload + upload()
 // https://vercel.com/docs/vercel-blob/client-upload
 
-import { upload } from '@vercel/blob/client';
-
 export const config = { runtime: 'nodejs18.x' };
+
+import { upload } from '@vercel/blob/client';
 
 export async function generateAiLineArt(
   imageDataUrl: string,

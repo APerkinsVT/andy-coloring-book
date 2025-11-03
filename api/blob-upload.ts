@@ -1,6 +1,7 @@
 // api/blob-upload.ts
 // Edge-compatible token endpoint for Vercel Blob client uploads.
 
+
 export const config = { runtime: 'edge' };
 
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';

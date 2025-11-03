@@ -2,8 +2,8 @@
 // Node runtime wrapper: fetch image by URL, convert to data URL,
 // then call your existing /api/ai-lineart with a small JSON body.
 
-export const config = { runtime: 'nodejs18.x' };
 
+export const config = { runtime: 'nodejs18.x' };
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

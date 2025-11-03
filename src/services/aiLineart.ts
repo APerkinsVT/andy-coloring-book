@@ -44,7 +44,7 @@ export async function generateAiLineArt(
     );
   }
 
-  const r = await fetch("/api/ai-lineart", {
+  const r = await fetch("/api/ai-lineart-from-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ imageDataUrl: compact, prompt }),
