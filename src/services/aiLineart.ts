@@ -1,126 +1,105 @@
 // src/services/aiLineart.ts
-// Uploads a compressed image to Vercel Blob, then calls /api/ai-lineart-from-url.
-// Adds clear console logs so we can see exactly where anything fails.
+// Robust client: accepts imageSrc (data: or https), or file/blob/canvas.
+// Flow:
+//   - If data URL: POST -> /api/upload-data-url -> https URL
+//   - If https URL: use directly
+//   - If File/Blob/Canvas: convert to data URL, then upload -> https URL
+//   - GET /api/ai-lineart-simple?imageUrl=...&prompt=... -> line-art URL
 
-import { upload } from '@vercel/blob/client';
+export type LineArtResult = { imageUrl: string };
 
-export async function generateAiLineArt(
-  imageDataUrl: string,
-  prompt?: string
-): Promise<{ imageUrl: string; raw?: any }> {
-  try {
-    // 1) Downscale/compress a bit for faster upload
-    const { blob, width, height, bytes } = await downscaleToBlob(imageDataUrl, {
-      maxDim: 1400,
-      quality: 0.8,
-      mime: 'image/jpeg',
-    });
-    console.log(`[ai-lineart] compressed: ${width}×${height}, ~${prettyBytes(bytes)}`);
-
-    // 2) Upload directly to Vercel Blob (token issued by /api/blob-upload)
-    const filename = `original-${Date.now()}.jpg`;
-    console.log(`[ai-lineart] starting blob upload → ${filename}`);
-
-    const put = await upload(filename, blob, {
-      access: 'public',
-      handleUploadUrl: '/api/blob-upload',
-    });
-
-    console.log('[ai-lineart] blob upload result:', put);
-
-    if (!put || !put.url) {
-      throw new Error('Upload returned no URL. Check /api/blob-upload and Vercel Blob setup.');
-    }
-
-    // 3) Call the Node wrapper with the Blob URL
-    console.log('[ai-lineart] calling /api/ai-lineart-from-url with imageUrl:', put.url);
-
-    const r = await fetch('/api/ai-lineart-from-url', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ imageUrl: put.url, prompt }),
-    });
-
-    const ct = r.headers.get('content-type') || '';
-    if (!ct.includes('application/json')) {
-      const txt = await r.text();
-      throw new Error(`Wrapper failed: ${r.status} ${r.statusText} – ${txt.slice(0, 200)}`);
-    }
-
-    const json = await r.json();
-    if (!r.ok) {
-      console.error('Wrapper error payload:', json);
-      throw new Error(`Wrapper failed: ${r.status} – ${json?.error ?? 'Unknown error'}`);
-    }
-
-    if (!json?.imageUrl) {
-      console.warn('Wrapper succeeded but no imageUrl in payload. Raw:', json);
-      throw new Error('Wrapper succeeded but no imageUrl parsed.');
-    }
-
-    console.log('[ai-lineart] SUCCESS. lineArt URL:', json.imageUrl);
-    return { imageUrl: json.imageUrl as string, raw: json.raw };
-  } catch (err) {
-    console.error('[ai-lineart] generateAiLineArt error:', err);
-    throw err;
-  }
+function isDataUrl(s: string) {
+  return typeof s === "string" && /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(s);
 }
 
-/* ── helpers ─────────────────────────────────────────── */
-
-type DownscaleOpts = {
-  maxDim: number;
-  quality: number;
-  mime?: 'image/jpeg' | 'image/webp' | 'image/png';
-};
-
-async function downscaleToBlob(
-  dataUrl: string,
-  { maxDim, quality, mime = 'image/jpeg' }: DownscaleOpts
-): Promise<{ blob: Blob; width: number; height: number; bytes: number }> {
-  const img = await loadImage(dataUrl);
-  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-  const w = Math.max(1, Math.round(img.width * scale));
-  const h = Math.max(1, Math.round(img.height * scale));
-
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext('2d', { alpha: false });
-  if (!ctx) throw new Error('Canvas 2D context unavailable');
-
-  if (mime === 'image/jpeg') {
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, w, h);
-  }
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, 0, 0, w, h);
-
-  const blob = await canvasToBlob(c, mime, clamp01(quality));
-  return { blob, width: w, height: h, bytes: blob.size };
+function isHttpUrl(s: string) {
+  try { const u = new URL(s); return u.protocol === "http:" || u.protocol === "https:"; }
+  catch { return false; }
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, mime: string, quality: number): Promise<Blob> {
+function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), mime, quality);
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("Failed to read blob"));
+    fr.onload = () => resolve(String(fr.result || ""));
+    fr.readAsDataURL(blob);
   });
 }
 
-function loadImage(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img as HTMLImageElement);
-    img.onerror = (e) => reject(e);
-    img.src = dataUrl;
+async function canvasToDataUrl(canvas: HTMLCanvasElement): Promise<string> {
+  return canvas.toDataURL("image/png");
+}
+
+async function uploadDataUrl(imageDataUrl: string): Promise<string> {
+  const r = await fetch("/api/upload-data-url", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ imageDataUrl }),
   });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j?.imageUrl) {
+    const msg = (j && (j.error || j.detail)) || r.statusText || "Upload failed";
+    throw new Error(`Upload failed: ${msg}`);
+  }
+  return j.imageUrl as string;
 }
 
-function clamp01(x: number) { return Math.max(0, Math.min(1, x)); }
+async function callAiLineartSimple(imageUrl: string, prompt = ""): Promise<LineArtResult> {
+  const base = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  const url = new URL("/api/ai-lineart-simple", base);
+  url.searchParams.set("imageUrl", imageUrl);
+  if (prompt) url.searchParams.set("prompt", prompt);
 
-function prettyBytes(n: number) {
-  const u = ['B', 'KB', 'MB', 'GB'];
-  let v = n, i = 0;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(1)} ${u[i]}`;
+  const r = await fetch(url.toString(), { method: "GET" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j?.imageUrl) {
+    const msg = (j && (j.error || j.detail)) || r.statusText || "AI line art failed";
+    throw new Error(`AI line art failed: ${msg}`);
+  }
+  return { imageUrl: j.imageUrl as string };
 }
+
+/** Main entry – tolerant of several input shapes. */
+export async function generateAiLineArt(input: {
+  imageSrc?: string;       // data: URL or https URL
+  file?: File;             // optional
+  blob?: Blob;             // optional
+  canvas?: HTMLCanvasElement; // optional
+  prompt?: string;
+}): Promise<LineArtResult> {
+  const { imageSrc, file, blob, canvas, prompt = "" } = input || ({} as any);
+
+  let src = imageSrc || "";
+  if (!src) {
+    if (file) src = await blobToDataUrl(file);
+    else if (blob) src = await blobToDataUrl(blob);
+    else if (canvas) src = await canvasToDataUrl(canvas);
+  }
+
+  if (!src) throw new Error("Missing imageSrc"); // keeps your existing error boundary behavior
+
+  let httpsUrl = src;
+  if (isDataUrl(src)) {
+    httpsUrl = await uploadDataUrl(src);
+  } else if (!isHttpUrl(src)) {
+    // If someone passed a bare filename or something odd, treat as error
+    throw new Error("imageSrc must be a data URL or http(s) URL");
+  }
+
+  return callAiLineartSimple(httpsUrl, prompt);
+}
+
+// Back-compat alias used elsewhere
+export const generateLineArt = generateAiLineArt;
+
+// Convenience helpers
+export async function lineartFromDataUrl(dataUrl: string, prompt = "") {
+  const httpsUrl = await uploadDataUrl(dataUrl);
+  return callAiLineartSimple(httpsUrl, prompt);
+}
+export async function lineartFromUrl(imageUrl: string, prompt = "") {
+  return callAiLineartSimple(imageUrl, prompt);
+}
+
+const api = { generateAiLineArt, generateLineArt, lineartFromDataUrl, lineartFromUrl };
+export default api;

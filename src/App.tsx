@@ -15,6 +15,17 @@ import { generateAiLineArt } from "@/services/aiLineart";
 import { openPrintView, type PrintableColorPlan } from "@/print";
 import { suggestTips } from "@/utils/suggestTips";
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("Failed to read image file"));
+    fr.onload = () => resolve(String(fr.result || ""));
+    fr.readAsDataURL(file);
+  });
+}
+
+
+
 /* ────────────────────────────────────────────────────────────────────────────
    Types
    ──────────────────────────────────────────────────────────────────────────── */
@@ -40,6 +51,9 @@ export default function App() {
   const [plan, setPlan] = React.useState<ColorPlan | null>(null);
 
   const imgRef = React.useRef<HTMLImageElement | null>(null);
+
+  const [imageSrc, setImageSrc] = React.useState<string>("");
+
 
   // current kit from the panel's <select id="kit">
   const kit: KitSize = (() => {
@@ -85,7 +99,8 @@ export default function App() {
       const imageDataUrl = imageToDataUrl(imgRef.current, 1600);
       setSourceDataUrl(imageDataUrl);
 
-      const { imageUrl } = await generateAiLineArt(imageDataUrl);
+      //const { imageUrl } = await generateAiLineArt(imageDataUrl);
+      const { imageUrl } = await generateAiLineArt({ imageSrc: imageDataUrl });
       if (!imageUrl) throw new Error("ai-lineart.ts returned no imageUrl");
 
       setLineUrl(imageUrl);
