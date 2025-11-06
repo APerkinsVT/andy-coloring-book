@@ -1,6 +1,17 @@
 {
   "redirects": [
-    { "source": "/(.*)", "destination": "https://photolineart.com/$1", "permanent": true }
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "andy-coloring-book.vercel.app" }],
+      "destination": "https://photolineart.com/$1",
+      "permanent": true
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "www.photolineart.com" }],
+      "destination": "https://photolineart.com/$1",
+      "permanent": true
+    }
   ],
   "rewrites": [
     { "source": "/p/:id", "destination": "/" }
