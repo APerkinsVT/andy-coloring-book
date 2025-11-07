@@ -1,9 +1,10 @@
 // api/bundles-create.ts
 // POST /api/bundles-create
-// Body: { sourceUrl, lineArtUrl, palette?, tips?, copyAssets? }
+// Body: { sourceUrl: string, lineArtUrl: string, palette?: any, tips?: any, copyAssets?: boolean }
+// Returns: { id, portalUrl, manifestUrl, qrPngUrl }
 
 import { put } from "@vercel/blob";
-import QRCode from "qrcode";
+import * as QRCode from "qrcode";
 import { customAlphabet } from "nanoid";
 
 const BASE =
@@ -15,23 +16,70 @@ const BASE =
 const nano = customAlphabet("abcdefghjkmnpqrstuvwxyz23456789", 10);
 
 type BundleBody = {
-  sourceUrl: string;
-  lineArtUrl: string;
+  sourceUrl?: string;
+  lineArtUrl?: string;
   palette?: any;
   tips?: any;
   copyAssets?: boolean;
 };
 
-async function readJsonBody(req: any): Promise<any> {
+// ---------- helpers ---------------------------------------------------------
+
+function tryParseJson(raw: string | undefined | null): Record<string, any> {
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+
+async function readJsonBody(req: any): Promise<Record<string, any>> {
+  // 1) Web Request-style (Edge / some dev proxies)
   try {
-    if (typeof req.json === "function") return await req.json();
+    if (typeof req.json === "function") {
+      const j = await req.json();
+      if (j && typeof j === "object") return j;
+    }
+  } catch {}
+
+  // 2) Frameworks often attach parsed/ raw data at req.body
+  try {
+    if (req.body !== undefined && req.body !== null) {
+      // Buffer body?
+      if (typeof Buffer !== "undefined" && Buffer.isBuffer(req.body)) {
+        return tryParseJson(req.body.toString("utf8"));
+      }
+      // Uint8Array body?
+      if (req.body instanceof Uint8Array) {
+        return tryParseJson(Buffer.from(req.body).toString("utf8"));
+      }
+      // String body?
+      if (typeof req.body === "string") {
+        return tryParseJson(req.body);
+      }
+      // Already-object
+      if (typeof req.body === "object") {
+        return req.body as Record<string, any>;
+      }
+    }
+  } catch {}
+
+  // 3) Node IncomingMessage stream (typical Vercel Node runtime)
+  try {
     const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    const raw = Buffer.concat(chunks).toString("utf8") || "{}";
-    return JSON.parse(raw);
-  } catch {
-    throw new Error("Invalid JSON body");
-  }
+    for await (const chunk of req) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const raw = Buffer.concat(chunks).toString("utf8");
+    if (raw) return tryParseJson(raw);
+  } catch {}
+
+  // 4) Last-resort: allow URL query (?sourceUrl=...&lineArtUrl=...) for debugging
+  try {
+    const u = new URL(req.url || "", "http://localhost");
+    const sourceUrl = u.searchParams.get("sourceUrl") || u.searchParams.get("sourceurl");
+    const lineArtUrl = u.searchParams.get("lineArtUrl") || u.searchParams.get("linearturl");
+    if (sourceUrl || lineArtUrl) return { sourceUrl, lineArtUrl };
+  } catch {}
+
+  return {};
 }
 
 async function fetchAsBuffer(url: string) {
@@ -43,6 +91,8 @@ async function fetchAsBuffer(url: string) {
   return { buf, contentType };
 }
 
+// ---------- route -----------------------------------------------------------
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -50,21 +100,30 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    if (!BASE) return res.status(500).json({ error: "Missing PUBLIC_BASE_URL" });
+    if (!BASE) {
+      return res.status(500).json({ error: "Missing PUBLIC_BASE_URL" });
+    }
 
     const body = (await readJsonBody(req)) as BundleBody;
+    console.log("[bundles-create] received body:", body);
+
     const { sourceUrl, lineArtUrl } = body;
-    const palette = body.palette ?? null;
-    const tips = body.tips ?? null;
-    const copyAssets = body.copyAssets !== false;
 
     if (!sourceUrl || !lineArtUrl) {
-      return res.status(400).json({ error: "Provide sourceUrl and lineArtUrl" });
+      return res.status(400).json({
+        error: "Provide sourceUrl and lineArtUrl",
+        received: body,
+      });
     }
+
+    const palette = body.palette ?? null;
+    const tips = body.tips ?? null;
+    const copyAssets = body.copyAssets !== false; // default true
 
     const id = `pla-${nano()}`;
     const baseKey = `bundles/${id}`;
 
+    // Optionally copy images into Blob for durability
     let storedSourceUrl = sourceUrl;
     let storedLineArtUrl = lineArtUrl;
 
@@ -134,8 +193,9 @@ export default async function handler(req: any, res: any) {
     });
   } catch (err: any) {
     console.error("[bundles-create] crash:", err);
-    return res
-      .status(500)
-      .json({ error: "bundles-create crashed", detail: err?.message || String(err) });
+    return res.status(500).json({
+      error: "bundles-create crashed",
+      detail: err?.message || String(err),
+    });
   }
 }

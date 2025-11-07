@@ -1,6 +1,8 @@
+
 /* src/App.tsx */
 
 import React from "react";
+import Portal from "./pages/Portal";
 import "@/index.css";
 
 import ColorPlanPanel from "@/components/ColorPlanPanel";
@@ -35,7 +37,15 @@ type AnalyzeStatus = "idle" | "analyzing" | "done" | "error";
 /* ────────────────────────────────────────────────────────────────────────────
    Component
    ──────────────────────────────────────────────────────────────────────────── */
+
 export default function App() {
+     // Route switch: render Portal for /p/:id
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/p/")) {
+    return <Portal />;
+  }
+
+  // ...the rest of your existing App UI below...
+  
   /* ======================
      SECTION B: state
      ====================== */

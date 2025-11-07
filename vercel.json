@@ -13,7 +13,10 @@
       "permanent": true
     }
   ],
+ 
   "rewrites": [
-    { "source": "/p/:id", "destination": "/" }
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/p/:id", "destination": "/" },
+    { "source": "/(.*)", "destination": "/" }
   ]
 }
