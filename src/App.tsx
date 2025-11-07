@@ -1,6 +1,8 @@
+
 /* src/App.tsx */
 
 import React from "react";
+import Portal from "./pages/Portal";
 import "@/index.css";
 
 import ColorPlanPanel from "@/components/ColorPlanPanel";
@@ -14,8 +16,6 @@ import { generateColorPlan } from "@/services/color";
 import { generateAiLineArt } from "@/services/aiLineart";
 import { openPrintView, type PrintableColorPlan } from "@/print";
 import { suggestTips } from "@/utils/suggestTips";
-
-import Portal from "./pages/Portal";
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -39,8 +39,8 @@ type AnalyzeStatus = "idle" | "analyzing" | "done" | "error";
    ──────────────────────────────────────────────────────────────────────────── */
 
 export default function App() {
-  // --- QR Portal route: /p/pla-xxxxx ---
-  if (typeof window !== "undefined" && /^\/p\/(pla-[A-Za-z0-9_-]+)$/.test(window.location.pathname)) {
+     // Route switch: render Portal for /p/:id
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/p/")) {
     return <Portal />;
   }
 
