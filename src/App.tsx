@@ -15,6 +15,8 @@ import { generateAiLineArt } from "@/services/aiLineart";
 import { openPrintView, type PrintableColorPlan } from "@/print";
 import { suggestTips } from "@/utils/suggestTips";
 
+import Portal from "./pages/Portal";
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -35,7 +37,15 @@ type AnalyzeStatus = "idle" | "analyzing" | "done" | "error";
 /* ────────────────────────────────────────────────────────────────────────────
    Component
    ──────────────────────────────────────────────────────────────────────────── */
+
 export default function App() {
+  // --- QR Portal route: /p/pla-xxxxx ---
+  if (typeof window !== "undefined" && /^\/p\/(pla-[A-Za-z0-9_-]+)$/.test(window.location.pathname)) {
+    return <Portal />;
+  }
+
+  // ...the rest of your existing App UI below...
+  
   /* ======================
      SECTION B: state
      ====================== */
