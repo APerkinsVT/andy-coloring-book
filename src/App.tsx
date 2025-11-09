@@ -1,6 +1,7 @@
 /* src/App.tsx */
 
 import React from "react";
+import Portal from "./pages/Portal";
 import "@/index.css";
 
 import ColorPlanPanel from "@/components/ColorPlanPanel";
@@ -36,6 +37,10 @@ type AnalyzeStatus = "idle" | "analyzing" | "done" | "error";
    Component
    ──────────────────────────────────────────────────────────────────────────── */
 export default function App() {
+    // Render Portal when path begins with /p/
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/p/")) {
+    return <Portal />;
+  }
   /* ======================
      SECTION B: state
      ====================== */
