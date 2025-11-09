@@ -164,10 +164,36 @@ export default function App() {
         return;
       }
 
-      // tips → string[] (compact for manifest)
-      const tipsForManifest: string[] = Array.isArray(tipsSuggested)
-        ? tipsSuggested.map(t => t?.text).filter(Boolean) as string[]
+      type ManifestTip = { text: string; pencil?: { brand?: string; name?: string; number?: string } };
+
+      const tipsForManifest: ManifestTip[] = Array.isArray(tipsSuggested)
+        ? tipsSuggested
+            .map((t: any) => {
+              const text = String(t?.text || "").trim();
+              if (!text) return null;
+
+              const pencil =
+                t?.pencil && (t.pencil.brand || t.pencil.name || t.pencil.number)
+                  ? {
+                      brand: t.pencil.brand || undefined,
+                      name: t.pencil.name || undefined,
+                      number:
+                        (t.pencil.number != null ? String(t.pencil.number) : undefined) ||
+                        (t.fcNo != null ? String(t.fcNo) : undefined),
+                    }
+                  : (t?.name || t?.fcNo)
+                  ? {
+                      brand: "Faber-Castell Polychromos",
+                      name: t.name || undefined,
+                      number: t.fcNo != null ? String(t.fcNo) : undefined,
+                    }
+                  : undefined;
+
+              return pencil ? { text, pencil } : { text };
+            })
+            .filter(Boolean) as ManifestTip[]
         : [];
+
 
       // palette → [{ hex, name, brand?, number? }]
       const paletteForManifest =
