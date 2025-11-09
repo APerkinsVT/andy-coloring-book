@@ -172,50 +172,54 @@ export default function App() {
      ====================== */
 
   // --- publish current image + line art to the public Portal ---
-  async function handlePublishToPortal() {
-    if (publishing) return;            // prevent double-click
-    setPublishing(true);
-    try {
-      // Use your actual in-scope vars:
-      const sourceUrlStr: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
-      const lineArtUrlStr: string = typeof lineUrl === "string" ? lineUrl : "";
-      // Send tips as strings (Portal normalizes string[] -> Tip[])
-      const tipsForManifest: string[] = Array.isArray(tipsSuggested)
-        ? tipsSuggested.map(t => t.text).filter(Boolean)
-        : [];
+  // --- publish current image + line art (now includes tips) ---
+async function handlePublishToPortal() {
+  if (publishing) return;
+  setPublishing(true);
+  try {
+    // existing vars in your component:
+    const sourceUrlStr: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
+    const lineArtUrlStr: string = typeof lineUrl === "string" ? lineUrl : "";
 
+    if (!sourceUrlStr || !lineArtUrlStr) {
+      alert("Generate line art first (need both original and line art).");
+      return;
+    }
 
-      if (!sourceUrlStr || !lineArtUrlStr) {
-        alert("Generate line art first (need both original and line art).");
-        return;
-      }
+    // tips → string[] for the manifest
+    const tipsForManifest: string[] = Array.isArray(tipsSuggested)
+      ? tipsSuggested.map(t => t?.text).filter(Boolean) as string[]
+      : [];
 
-      const r = await fetch("/api/bundles-create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceUrl: sourceUrlStr,
-          lineArtUrl: lineArtUrlStr,
-          tips: tipsForManifest
-          // palette: TODO (we’ll add in the next step)
-        }),
-      });
-      if (!r.ok) throw new Error(await r.text());
+    const payload = {
+      sourceUrl: sourceUrlStr,
+      lineArtUrl: lineArtUrlStr,
+      tips: tipsForManifest,   // <— NEW
+      // palette: will add next step
+    };
 
-      const json = await r.json();
-      if (json?.portalUrl) {
-        window.open(json.portalUrl, "_blank");
-      } else {
-        alert("Published, but no portalUrl returned.");
-        console.warn("bundles-create response:", json);
-      }
-    } catch (e) {
+    const r = await fetch("/api/bundles-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(await r.text());
+
+    const json = await r.json();
+    if (json?.portalUrl) {
+      window.open(json.portalUrl, "_blank");
+    } else {
+      alert("Published, but no portalUrl returned.");
+      console.warn("bundles-create response:", json);
+    }
+  } catch (e) {
     console.error("Publish failed:", e);
     alert("Publish failed — see console for details.");
   } finally {
     setPublishing(false);
   }
 }
+
 
   /* ======================
      SECTION E: render
