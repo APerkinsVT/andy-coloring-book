@@ -179,6 +179,11 @@ export default function App() {
       // Use your actual in-scope vars:
       const sourceUrlStr: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
       const lineArtUrlStr: string = typeof lineUrl === "string" ? lineUrl : "";
+      // Send tips as strings (Portal normalizes string[] -> Tip[])
+      const tipsForManifest: string[] = Array.isArray(tipsSuggested)
+        ? tipsSuggested.map(t => t.text).filter(Boolean)
+        : [];
+
 
       if (!sourceUrlStr || !lineArtUrlStr) {
         alert("Generate line art first (need both original and line art).");
@@ -188,7 +193,12 @@ export default function App() {
       const r = await fetch("/api/bundles-create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceUrl: sourceUrlStr, lineArtUrl: lineArtUrlStr }),
+        body: JSON.stringify({
+          sourceUrl: sourceUrlStr,
+          lineArtUrl: lineArtUrlStr,
+          tips: tipsForManifest
+          // palette: TODO (we’ll add in the next step)
+        }),
       });
       if (!r.ok) throw new Error(await r.text());
 
