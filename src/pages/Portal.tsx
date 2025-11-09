@@ -88,7 +88,7 @@ export default function Portal() {
     <div
       style={{
         background: "#e9d5ff",
-        border: "1px solid "#c4b5fd",
+        border: "1px solid #c4b5fd",
         color: "#3730a3",
         padding: "10px 14px",
         borderRadius: 8,
