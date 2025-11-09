@@ -25,24 +25,16 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-/* ────────────────────────────────────────────────────────────────────────────
-   Types
-   ──────────────────────────────────────────────────────────────────────────── */
 type GenStatus = "idle" | "generating" | "done" | "error";
 type AnalyzeStatus = "idle" | "analyzing" | "done" | "error";
 
-/* ────────────────────────────────────────────────────────────────────────────
-   Component
-   ──────────────────────────────────────────────────────────────────────────── */
 export default function App() {
   // Render Portal when path begins with /p/
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/p/")) {
     return <Portal />;
   }
 
-  /* ======================
-     SECTION B: state
-     ====================== */
+  // ── State ────────────────────────────────────────────────
   const [fileName, setFileName] = React.useState<string | undefined>(undefined);
   const [sourceUrl, setSourceUrl] = React.useState<string | undefined>(undefined);
   const [sourceDataUrl, setSourceDataUrl] = React.useState<string | undefined>(undefined);
@@ -57,30 +49,24 @@ export default function App() {
 
   const imgRef = React.useRef<HTMLImageElement | null>(null);
 
-  const [imageSrc, setImageSrc] = React.useState<string>(""); // kept if other code references it
-
   // current kit from the panel's <select id="kit">
   const kit: KitSize = (() => {
     const el = document.getElementById("kit") as HTMLSelectElement | null;
     return el ? (Number(el.value) as KitSize) : (KitSize.K72 as KitSize);
   })();
 
-  // rows for tips & printing (deduped, same as Page 3)
+  // Tips inputs
   const rowsForTips = React.useMemo(() => {
     if (!plan) return [];
     return buildPrintableFromPlan(plan, kit).rows;
   }, [plan, kit]);
 
-  // auto-suggested tips, always in sync with image + kit
   const tipsSuggested: Tip[] = React.useMemo(() => {
     return suggestTips(rowsForTips);
   }, [rowsForTips]);
 
-  /* ======================
-     SECTION C: handlers
-     ====================== */
-
-  function onChoosePhoto(ev: React.ChangeEvent<HTMLInputElement>) {
+  // ── Handlers ─────────────────────────────────────────────
+  async function onChoosePhoto(ev: React.ChangeEvent<HTMLInputElement>) {
     const f = ev.target.files?.[0];
     if (!f) return;
 
@@ -101,11 +87,10 @@ export default function App() {
     setErrorMsg(null);
 
     try {
-      // Downscale and capture original as data URL (works for API + printing)
+      // Downscale original to data URL for API + print
       const imageDataUrl = imageToDataUrl(imgRef.current, 1600);
       setSourceDataUrl(imageDataUrl);
 
-      // Call your AI lineart service (already adapted to { imageSrc })
       const { imageUrl } = await generateAiLineArt({ imageSrc: imageDataUrl });
       if (!imageUrl) throw new Error("ai-lineart.ts returned no imageUrl");
 
@@ -138,7 +123,6 @@ export default function App() {
 
   function onPrintPdf() {
     if (!lineUrl) return;
-
     const printablePlan = plan ? buildPrintableFromPlan(plan, kit) : undefined;
 
     openPrintView({
@@ -148,7 +132,7 @@ export default function App() {
       orientation:
         ((plan as any)?.source?.orientation as "portrait" | "landscape") || "portrait",
       colorPlan: printablePlan,
-      tips: tipsSuggested, // Page 2: read-only, auto-suggested tips
+      tips: tipsSuggested,
     });
   }
 
@@ -167,64 +151,56 @@ export default function App() {
     setErrorMsg(null);
   }
 
-  /* ======================
-     SECTION D: publish handler
-     ====================== */
+  // ── Publish (includes tips) ──────────────────────────────
+  async function handlePublishToPortal() {
+    if (publishing) return;
+    setPublishing(true);
+    try {
+      const sourceUrlStr: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
+      const lineArtUrlStr: string = typeof lineUrl === "string" ? lineUrl : "";
 
-  // --- publish current image + line art to the public Portal ---
-  // --- publish current image + line art (now includes tips) ---
-async function handlePublishToPortal() {
-  if (publishing) return;
-  setPublishing(true);
-  try {
-    // existing vars in your component:
-    const sourceUrlStr: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
-    const lineArtUrlStr: string = typeof lineUrl === "string" ? lineUrl : "";
+      if (!sourceUrlStr || !lineArtUrlStr) {
+        alert("Generate line art first (need both original and line art).");
+        return;
+      }
 
-    if (!sourceUrlStr || !lineArtUrlStr) {
-      alert("Generate line art first (need both original and line art).");
-      return;
+      // tips → string[] (compact for manifest)
+      const tipsForManifest: string[] = Array.isArray(tipsSuggested)
+        ? tipsSuggested.map(t => t?.text).filter(Boolean) as string[]
+        : [];
+
+      const payload = {
+        sourceUrl: sourceUrlStr,
+        lineArtUrl: lineArtUrlStr,
+        tips: tipsForManifest,
+        // palette: (next step)
+      };
+
+      console.log("Publishing payload →", payload);
+
+      const r = await fetch("/api/bundles-create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(await r.text());
+
+      const json = await r.json();
+      if (json?.portalUrl) {
+        window.open(json.portalUrl, "_blank");
+      } else {
+        alert("Published, but no portalUrl returned.");
+        console.warn("bundles-create response:", json);
+      }
+    } catch (e) {
+      console.error("Publish failed:", e);
+      alert("Publish failed — see console for details.");
+    } finally {
+      setPublishing(false);
     }
-
-    // tips → string[] for the manifest
-    const tipsForManifest: string[] = Array.isArray(tipsSuggested)
-      ? tipsSuggested.map(t => t?.text).filter(Boolean) as string[]
-      : [];
-
-    const payload = {
-      sourceUrl: sourceUrlStr,
-      lineArtUrl: lineArtUrlStr,
-      tips: tipsForManifest,   // <— NEW
-      // palette: will add next step
-    };
-
-    const r = await fetch("/api/bundles-create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!r.ok) throw new Error(await r.text());
-
-    const json = await r.json();
-    if (json?.portalUrl) {
-      window.open(json.portalUrl, "_blank");
-    } else {
-      alert("Published, but no portalUrl returned.");
-      console.warn("bundles-create response:", json);
-    }
-  } catch (e) {
-    console.error("Publish failed:", e);
-    alert("Publish failed — see console for details.");
-  } finally {
-    setPublishing(false);
   }
-}
 
-
-  /* ======================
-     SECTION E: render
-     ====================== */
-
+  // ── Render ───────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
       <div className="max-w-6xl mx-auto p-4">
@@ -235,7 +211,6 @@ async function handlePublishToPortal() {
           </p>
         </header>
 
-        {/* Actions */}
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <label className="inline-flex items-center gap-2 px-3 py-2 border rounded-md bg-white cursor-pointer">
             <input type="file" accept="image/*" className="hidden" onChange={onChoosePhoto} />
@@ -273,11 +248,11 @@ async function handlePublishToPortal() {
             disabled={publishing || !sourceDataUrl || !lineUrl}
             aria-busy={publishing}
             className="px-3 py-2 rounded-md border bg-white text-slate-900 shadow-sm
-                      hover:bg-slate-50
-                      active:bg-slate-100 active:scale-[0.98]
-                      transition-colors transition-transform duration-100
-                      focus:outline-none focus:ring-2 focus:ring-indigo-500
-                      disabled:opacity-50 disabled:cursor-not-allowed"
+                       hover:bg-slate-50
+                       active:bg-slate-100 active:scale-[0.98]
+                       transition-colors transition-transform duration-100
+                       focus:outline-none focus:ring-2 focus:ring-indigo-500
+                       disabled:opacity-50 disabled:cursor-not-allowed"
             title="Publish this result and open its sharable portal page"
           >
             {publishing ? (
@@ -293,22 +268,18 @@ async function handlePublishToPortal() {
             )}
           </button>
 
-
           <button onClick={onReset} className="px-3 py-2 rounded-md bg-white border">
             Reset
           </button>
         </div>
 
-        {/* Error banner */}
         {errorMsg && (
           <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-100 rounded-md p-2">
             {errorMsg}
           </div>
         )}
 
-        {/* Layout */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-          {/* Left: Original */}
           <div className="rounded-xl bg-white border shadow-sm p-3">
             <h2 className="text-sm font-semibold mb-2">Original</h2>
             {sourceUrl ? (
@@ -323,7 +294,6 @@ async function handlePublishToPortal() {
             )}
           </div>
 
-          {/* Middle: Line Art */}
           <div className="rounded-xl bg-white border shadow-sm p-3">
             <h2 className="text-sm font-semibold mb-2">Line Art (AI)</h2>
             {lineUrl ? (
@@ -337,7 +307,6 @@ async function handlePublishToPortal() {
             )}
           </div>
 
-          {/* Right: Color Plan + Tips */}
           <div className="space-y-4">
             <div className="rounded-xl bg-white shadow-sm p-3">
               <h2 className="text-sm font-semibold mb-2">Color Plan</h2>
@@ -362,10 +331,6 @@ async function handlePublishToPortal() {
   );
 }
 
-/* ======================
-   SECTION F: helpers
-   ====================== */
-
 function Placeholder() {
   return (
     <div className="h-[200px] grid place-items-center text-sm text-gray-500 border rounded-md bg-gray-50">
@@ -374,7 +339,6 @@ function Placeholder() {
   );
 }
 
-/** Downscale an IMG to a DataURL for API consumption. */
 function imageToDataUrl(imgEl: HTMLImageElement, maxDim = 1600): string {
   const w = imgEl.naturalWidth || imgEl.width;
   const h = imgEl.naturalHeight || imgEl.height;
@@ -392,7 +356,6 @@ function imageToDataUrl(imgEl: HTMLImageElement, maxDim = 1600): string {
   return canvas.toDataURL("image/png");
 }
 
-/** Build printable rows (same selection as panel) + de-dupe identical pencils. */
 function buildPrintableFromPlan(
   plan: ColorPlan,
   kit: KitSize
@@ -414,10 +377,7 @@ function buildPrintableFromPlan(
 
   const rawRows = visible.map((c, i) => {
     const matchesByKit = (c as any).matchesByKit as
-      | Record<
-          string | number,
-          { fcId?: number; fcNo?: number; name?: string; label?: string; pencilName?: string; hex?: string; deltaE00?: number }
-        >
+      | Record<string | number, { fcId?: number; fcNo?: number; name?: string; label?: string; pencilName?: string; hex?: string; deltaE00?: number }>
       | undefined;
 
     const m = (matchesByKit?.[kit] ?? matchesByKit?.[String(kit)] ?? c.matched) as any;
@@ -438,7 +398,6 @@ function buildPrintableFromPlan(
 
   const rows = dedupeRows(rawRows);
 
-  // footer notes
   const paletteNote = `Palette: ${plan.paletteMeta.set} · ${plan.paletteMeta.count} swatches · v${plan.paletteMeta.version}`;
   let qaAvg = 0, qaWorst = 0, wsum = 0;
   for (const r of rows) {
@@ -455,14 +414,7 @@ function buildPrintableFromPlan(
 }
 
 function dedupeRows(
-  rows: Array<{
-    idx: number;
-    hex?: string;
-    fcNo?: string;
-    name?: string;
-    coveragePct?: number;
-    deltaE?: number;
-  }>
+  rows: Array<{ idx: number; hex?: string; fcNo?: string; name?: string; coveragePct?: number; deltaE?: number }>
 ) {
   const out: typeof rows = [];
   const where = new Map<string, number>();
