@@ -51,6 +51,7 @@ export default function App() {
   const [genStatus, setGenStatus] = React.useState<GenStatus>("idle");
   const [anStatus, setAnStatus] = React.useState<AnalyzeStatus>("idle");
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const [publishing, setPublishing] = React.useState(false);
 
   const [plan, setPlan] = React.useState<ColorPlan | null>(null);
 
@@ -172,6 +173,8 @@ export default function App() {
 
   // --- publish current image + line art to the public Portal ---
   async function handlePublishToPortal() {
+    if (publishing) return;            // prevent double-click
+    setPublishing(true);
     try {
       // Use your actual in-scope vars:
       const sourceUrlStr: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
@@ -197,10 +200,12 @@ export default function App() {
         console.warn("bundles-create response:", json);
       }
     } catch (e) {
-      console.error("Publish failed:", e);
-      alert("Publish failed — see console for details.");
-    }
+    console.error("Publish failed:", e);
+    alert("Publish failed — see console for details.");
+  } finally {
+    setPublishing(false);
   }
+}
 
   /* ======================
      SECTION E: render
@@ -251,11 +256,17 @@ export default function App() {
 
           <button
             onClick={handlePublishToPortal}
-            className="px-3 py-2 rounded-md bg-white border text-slate-900"
+            disabled={publishing || !sourceDataUrl || !lineUrl}
+            className={[
+              "px-3 py-2 rounded-md bg-white border text-slate-900",
+              "transition active:scale-95",          // tactile click
+              "disabled:opacity-50 disabled:cursor-not-allowed" // busy/invalid
+            ].join(" ")}
             title="Publish this result and open its sharable portal page"
           >
-            Publish & Get QR
+            {publishing ? "Publishing…" : "Publish & Get QR"}
           </button>
+
 
           <button onClick={onReset} className="px-3 py-2 rounded-md bg-white border">
             Reset
