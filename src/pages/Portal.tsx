@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import PaletteGrid from "../components/PaletteGrid";
-import TipsPanel from "../components/TipsPanel";
+
+import PaletteGrid from "@/components/PaletteGrid";
+import TipsPanel from "@/components/TipsPanel";
 
 type PaletteEntry = { hex: string; name: string; brand?: string; number?: string };
 
@@ -194,9 +195,8 @@ export default function Portal() {
         <TipsPanel
           tips={
             Array.isArray(m.tips)
-              ? // normalize string[] -> { text: string }[]
-                (m.tips as any[]).map((t: any) => (typeof t === "string" ? { text: t } : t))
-              : undefined
+              ? (m.tips as any[]).map((t: any) => (typeof t === "string" ? { text: t } : t))
+              : []
           }
         />
       </section>
