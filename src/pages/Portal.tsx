@@ -11,7 +11,7 @@ type ManifestShape = {
   sourceUrl?: string;
   lineArtUrl?: string;
   palette?: PaletteEntry[] | null;
-  tips?: string[] | null;
+  tips?: string[] | null; // API returns string[]
   qrPngUrl?: string;
   portalUrl?: string;
   manifestUrl?: string;
@@ -88,7 +88,7 @@ export default function Portal() {
     <div
       style={{
         background: "#e9d5ff",
-        border: "1px solid #c4b5fd",
+        border: "1px solid "#c4b5fd",
         color: "#3730a3",
         padding: "10px 14px",
         borderRadius: 8,
@@ -191,7 +191,14 @@ export default function Portal() {
 
       <section aria-label="Palette & Tips" style={{ display: "grid", gap: 16 }}>
         <PaletteGrid palette={m.palette ?? undefined} />
-        <TipsPanel tips={tipsForPanel} />
+        <TipsPanel
+          tips={
+            Array.isArray(m.tips)
+              ? // normalize string[] -> { text: string }[]
+                (m.tips as any[]).map((t: any) => (typeof t === "string" ? { text: t } : t))
+              : undefined
+          }
+        />
       </section>
     </div>
   );
