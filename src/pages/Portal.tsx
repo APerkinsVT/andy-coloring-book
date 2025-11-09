@@ -117,7 +117,9 @@ export default function Portal() {
         <Banner />
         <h2 style={{ marginTop: 0 }}>Couldn’t load bundle</h2>
         <pre style={{ whiteSpace: "pre-wrap", background: "#fafafa", border: "1px solid #eee", padding: 12 }}>
-{err}
+        {err.includes('"code": "404"')
+          ? "We couldn’t find that bundle. It may have expired or the ID is wrong."
+          : err}
         </pre>
       </div>
     );
