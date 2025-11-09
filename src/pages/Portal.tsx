@@ -193,7 +193,6 @@ export default function Portal() {
       </section>
 
       <section aria-label="Palette & Tips" style={{ display: "grid", gap: 16 }}>
-        <PaletteGrid palette={m.palette ?? undefined} />
         <TipsPanel
           palette={m.palette ?? []}   //  <-- add this
           tips={
