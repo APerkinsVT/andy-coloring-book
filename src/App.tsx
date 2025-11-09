@@ -169,12 +169,31 @@ export default function App() {
         ? tipsSuggested.map(t => t?.text).filter(Boolean) as string[]
         : [];
 
+      // palette → [{ hex, name, brand?, number? }]
+      const paletteForManifest =
+        plan
+          ? buildPrintableFromPlan(plan, kit).rows
+              .map((r) => ({
+                hex: (r.hex || "").toUpperCase(),
+                name: r.name || "",
+                brand: "Faber-Castell Polychromos",
+                number: r.fcNo || "",
+              }))
+              // keep only meaningful entries, dedupe by hex+name, cap to 24
+              .filter((e) => e.hex && e.name)
+              .filter((e, i, arr) => i === arr.findIndex(x => x.hex === e.hex && x.name === e.name))
+              .slice(0, 24)
+          : [];
+
+
       const payload = {
         sourceUrl: sourceUrlStr,
         lineArtUrl: lineArtUrlStr,
         tips: tipsForManifest,
-        // palette: (next step)
+        palette: paletteForManifest,   // <— NEW
       };
+
+      console.log("Publishing payload →", payload);
 
       console.log("Publishing payload →", payload);
 
