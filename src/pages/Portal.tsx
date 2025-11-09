@@ -195,10 +195,11 @@ export default function Portal() {
       <section aria-label="Palette & Tips" style={{ display: "grid", gap: 16 }}>
         <PaletteGrid palette={m.palette ?? undefined} />
         <TipsPanel
+          palette={m.palette ?? []}   //  <-- add this
           tips={
             Array.isArray(m.tips)
               ? (m.tips as any[]).map((t: any) => (typeof t === "string" ? { text: t } : t))
-              : []
+              : undefined
           }
         />
       </section>
