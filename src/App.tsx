@@ -173,9 +173,9 @@ export default function App() {
 async function handlePublishToPortal() {
   try {
     // Use whatever your state vars are named.
-    // These two lines are the ONLY thing you may need to tweak:
-    const sourceUrl = (typeof originalUrl === "string" && originalUrl) || "";
-    const lineArtUrl = (typeof lineArtUrl === "string" && lineArtUrl) || "";
+    // Use the actual in-scope vars:
+    const sourceUrl: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
+    const lineArtUrl: string = typeof lineUrl === "string" ? lineUrl : "";
 
     if (!sourceUrl || !lineArtUrl) {
       alert("Generate line art first (need both sourceUrl and lineArtUrl).");
