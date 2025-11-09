@@ -13,19 +13,17 @@ import type { Tip } from "@/types/tips";
 
 import { generateColorPlan } from "@/services/color";
 import { generateAiLineArt } from "@/services/aiLineart";
-import { openPrintView, type PrintableColorPlan } from "@/print";
+import { openPrintView } from "@/print";
 import { suggestTips } from "@/utils/suggestTips";
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
     fr.onerror = () => reject(new Error("Failed to read image file"));
-    fr.onload = () => resolve(String(fr.result || ""));
+    fr.onload = () => resolve(String(fr.result || "")); // data: URL
     fr.readAsDataURL(file);
   });
 }
-
-
 
 /* ────────────────────────────────────────────────────────────────────────────
    Types
@@ -37,10 +35,11 @@ type AnalyzeStatus = "idle" | "analyzing" | "done" | "error";
    Component
    ──────────────────────────────────────────────────────────────────────────── */
 export default function App() {
-    // Render Portal when path begins with /p/
+  // Render Portal when path begins with /p/
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/p/")) {
     return <Portal />;
   }
+
   /* ======================
      SECTION B: state
      ====================== */
@@ -57,8 +56,7 @@ export default function App() {
 
   const imgRef = React.useRef<HTMLImageElement | null>(null);
 
-  const [imageSrc, setImageSrc] = React.useState<string>("");
-
+  const [imageSrc, setImageSrc] = React.useState<string>(""); // kept if other code references it
 
   // current kit from the panel's <select id="kit">
   const kit: KitSize = (() => {
@@ -84,6 +82,7 @@ export default function App() {
   function onChoosePhoto(ev: React.ChangeEvent<HTMLInputElement>) {
     const f = ev.target.files?.[0];
     if (!f) return;
+
     const url = URL.createObjectURL(f);
     setFileName(f.name);
     setSourceUrl(url);
@@ -101,10 +100,11 @@ export default function App() {
     setErrorMsg(null);
 
     try {
+      // Downscale and capture original as data URL (works for API + printing)
       const imageDataUrl = imageToDataUrl(imgRef.current, 1600);
       setSourceDataUrl(imageDataUrl);
 
-      //const { imageUrl } = await generateAiLineArt(imageDataUrl);
+      // Call your AI lineart service (already adapted to { imageSrc })
       const { imageUrl } = await generateAiLineArt({ imageSrc: imageDataUrl });
       if (!imageUrl) throw new Error("ai-lineart.ts returned no imageUrl");
 
@@ -167,39 +167,44 @@ export default function App() {
   }
 
   /* ======================
-     SECTION D: render
+     SECTION D: publish handler
      ====================== */
-// --- publish current image + line art to the public Portal ---
-async function handlePublishToPortal() {
-  try {
-    // Use whatever your state vars are named.
-    // Use the actual in-scope vars:
-    const sourceUrl: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
-    const lineArtUrl: string = typeof lineUrl === "string" ? lineUrl : "";
 
-    if (!sourceUrl || !lineArtUrl) {
-      alert("Generate line art first (need both sourceUrl and lineArtUrl).");
-      return;
-    }
+  // --- publish current image + line art to the public Portal ---
+  async function handlePublishToPortal() {
+    try {
+      // Use your actual in-scope vars:
+      const sourceUrlStr: string = typeof sourceDataUrl === "string" ? sourceDataUrl : "";
+      const lineArtUrlStr: string = typeof lineUrl === "string" ? lineUrl : "";
 
-    const r = await fetch("/api/bundles-create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sourceUrl, lineArtUrl }), // palette/tips can be added later
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const json = await r.json();
-    if (json?.portalUrl) {
-      window.open(json.portalUrl, "_blank");
-    } else {
-      alert("Published, but no portalUrl returned.");
-      console.warn("bundles-create response:", json);
+      if (!sourceUrlStr || !lineArtUrlStr) {
+        alert("Generate line art first (need both original and line art).");
+        return;
+      }
+
+      const r = await fetch("/api/bundles-create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceUrl: sourceUrlStr, lineArtUrl: lineArtUrlStr }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+
+      const json = await r.json();
+      if (json?.portalUrl) {
+        window.open(json.portalUrl, "_blank");
+      } else {
+        alert("Published, but no portalUrl returned.");
+        console.warn("bundles-create response:", json);
+      }
+    } catch (e) {
+      console.error("Publish failed:", e);
+      alert("Publish failed — see console for details.");
     }
-  } catch (e: any) {
-    console.error("Publish failed:", e);
-    alert("Publish failed — see console for details.");
   }
-}
+
+  /* ======================
+     SECTION E: render
+     ====================== */
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -246,12 +251,11 @@ async function handlePublishToPortal() {
 
           <button
             onClick={handlePublishToPortal}
-            className="btn"
+            className="px-3 py-2 rounded-md bg-white border text-slate-900"
             title="Publish this result and open its sharable portal page"
           >
             Publish & Get QR
           </button>
-
 
           <button onClick={onReset} className="px-3 py-2 rounded-md bg-white border">
             Reset
@@ -322,7 +326,7 @@ async function handlePublishToPortal() {
 }
 
 /* ======================
-   SECTION E: helpers
+   SECTION F: helpers
    ====================== */
 
 function Placeholder() {
