@@ -169,6 +169,37 @@ export default function App() {
   /* ======================
      SECTION D: render
      ====================== */
+// --- publish current image + line art to the public Portal ---
+async function handlePublishToPortal() {
+  try {
+    // Use whatever your state vars are named.
+    // These two lines are the ONLY thing you may need to tweak:
+    const sourceUrl = (typeof originalUrl === "string" && originalUrl) || "";
+    const lineArtUrl = (typeof lineArtUrl === "string" && lineArtUrl) || "";
+
+    if (!sourceUrl || !lineArtUrl) {
+      alert("Generate line art first (need both sourceUrl and lineArtUrl).");
+      return;
+    }
+
+    const r = await fetch("/api/bundles-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceUrl, lineArtUrl }), // palette/tips can be added later
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const json = await r.json();
+    if (json?.portalUrl) {
+      window.open(json.portalUrl, "_blank");
+    } else {
+      alert("Published, but no portalUrl returned.");
+      console.warn("bundles-create response:", json);
+    }
+  } catch (e: any) {
+    console.error("Publish failed:", e);
+    alert("Publish failed — see console for details.");
+  }
+}
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -214,12 +245,13 @@ export default function App() {
           </button>
 
           <button
-            onClick={onDownloadPdf}
-            className="px-3 py-2 rounded-md bg-slate-800 text-white disabled:opacity-50"
-            disabled={!sourceUrl || !lineUrl}
+            onClick={handlePublishToPortal}
+            className="btn"
+            title="Publish this result and open its sharable portal page"
           >
-            Download PDF
+            Publish & Get QR
           </button>
+
 
           <button onClick={onReset} className="px-3 py-2 rounded-md bg-white border">
             Reset
