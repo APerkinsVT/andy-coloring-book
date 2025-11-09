@@ -257,14 +257,26 @@ export default function App() {
           <button
             onClick={handlePublishToPortal}
             disabled={publishing || !sourceDataUrl || !lineUrl}
-            className={[
-              "px-3 py-2 rounded-md bg-white border text-slate-900",
-              "transition active:scale-95",          // tactile click
-              "disabled:opacity-50 disabled:cursor-not-allowed" // busy/invalid
-            ].join(" ")}
+            aria-busy={publishing}
+            className="px-3 py-2 rounded-md border bg-white text-slate-900 shadow-sm
+                      hover:bg-slate-50
+                      active:bg-slate-100 active:scale-[0.98]
+                      transition-colors transition-transform duration-100
+                      focus:outline-none focus:ring-2 focus:ring-indigo-500
+                      disabled:opacity-50 disabled:cursor-not-allowed"
             title="Publish this result and open its sharable portal page"
           >
-            {publishing ? "Publishing…" : "Publish & Get QR"}
+            {publishing ? (
+              <span className="inline-flex items-center gap-2">
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
+                  <path className="opacity-75" d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" />
+                </svg>
+                Publishing…
+              </span>
+            ) : (
+              "Publish & Get QR"
+            )}
           </button>
 
 
