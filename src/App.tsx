@@ -221,8 +221,6 @@ export default function App() {
 
       console.log("Publishing payload →", payload);
 
-      console.log("Publishing payload →", payload);
-
       const r = await fetch("/api/bundles-create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
