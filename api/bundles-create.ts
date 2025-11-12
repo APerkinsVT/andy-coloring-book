@@ -6,11 +6,21 @@ import { put } from "@vercel/blob";
 import * as QRCode from "qrcode";
 import { customAlphabet } from "nanoid";
 
+function resolveBase(req: any) {
+  // 1) explicit env wins (prod uses your domain)
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL;
+  // 2) infer from host in dev; UI is on 5173, functions on 3001
+  const host = req?.headers?.host || "";
+  if (host.startsWith("localhost")) return "http://localhost:5173";
+  // 3) vercel preview/prod fallback
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:5173";
+}
 const BASE =
   process.env.PUBLIC_BASE_URL ||
   (typeof process !== "undefined" && process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000");
+    : "http://localhost:5173");
 
 const nano = customAlphabet("abcdefghjkmnpqrstuvwxyz23456789", 10);
 
@@ -63,6 +73,39 @@ async function fetchAsBuffer(url: string) {
   return { buf, contentType };
 }
 
+// NEW: helpers to normalize data URLs
+function isDataUrl(s?: string) {
+  return !!s && typeof s === "string" && s.startsWith("data:");
+}
+function isHttpUrl(s?: string) {
+  return !!s && /^https?:\/\//i.test(s);
+}
+function guessExtFromMime(mime: string) {
+  if (!mime) return "bin";
+  if (mime.includes("jpeg")) return "jpg";
+  if (mime.includes("jpg"))  return "jpg";
+  if (mime.includes("png"))  return "png";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("gif"))  return "gif";
+  return "bin";
+}
+async function uploadDataUrlToBlob(dataUrl: string, keyBase: string) {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) throw new Error("Invalid dataUrl format");
+  const meta = dataUrl.slice(0, comma); // e.g., data:image/png;base64
+  const base64 = dataUrl.slice(comma + 1);
+  const contentType = meta.match(/^data:([^;]+)/)?.[1] || "application/octet-stream";
+  const ext = guessExtFromMime(contentType);
+  const filename = `uploads/${keyBase}.${ext}`;
+  const buf = Buffer.from(base64, "base64");
+  const { url } = await put(filename, buf, {
+    access: "public",
+    contentType,
+    addRandomSuffix: true,
+  });
+  return { url, contentType };
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -75,15 +118,15 @@ export default async function handler(req: any, res: any) {
     const body = (await readJsonBody(req)) as BundleBody;
 
     // Normalize keys: allow originalUrl OR sourceUrl
-    const sourceUrl = body.sourceUrl || body.originalUrl || "";
-    const lineArtUrl = body.lineArtUrl || "";
-    const palette = body.palette ?? null;
-    const tips = body.tips ?? null;
+    const rawSource = body.sourceUrl || body.originalUrl || "";
+    const rawLine   = body.lineArtUrl || "";
+    const palette   = body.palette ?? null;
+    const tips      = body.tips ?? null;
     const copyAssets = body.copyAssets !== false; // default true
 
     console.log("[bundles-create] received (normalized)", {
-      sourceUrl,
-      lineArtUrl,
+      sourceUrl: rawSource,
+      lineArtUrl: rawLine,
       _raw: {
         sourceUrl: body.sourceUrl,
         originalUrl: body.originalUrl,
@@ -91,12 +134,12 @@ export default async function handler(req: any, res: any) {
       },
     });
 
-    if (!sourceUrl || !lineArtUrl) {
+    if (!rawSource || !rawLine) {
       return res.status(400).json({
         error: "Provide sourceUrl and lineArtUrl",
         received: {
-          sourceUrl: !!sourceUrl,
-          lineArtUrl: !!lineArtUrl,
+          sourceUrl: !!rawSource,
+          lineArtUrl: !!rawLine,
           _raw: body,
         },
       });
@@ -105,36 +148,58 @@ export default async function handler(req: any, res: any) {
     const id = `pla-${nano()}`;
     const baseKey = `bundles/${id}`;
 
-    let storedSourceUrl = sourceUrl;
-    let storedLineArtUrl = lineArtUrl;
+    // 1) If inputs are data URLs, upload them once to Blob to get http(s) URLs
+    let storedSourceUrl = rawSource;
+    let storedLineArtUrl = rawLine;
 
-    // Copy assets into Blob so links never expire
-    if (copyAssets) {
+    if (isDataUrl(storedSourceUrl)) {
       try {
-        const src = await fetchAsBuffer(sourceUrl);
-        const putSrc = await put(`${baseKey}/source.jpg`, src.buf, {
-          access: "public",
-          contentType: src.contentType || "image/jpeg",
-        });
-        storedSourceUrl = putSrc.url;
+        const up = await uploadDataUrlToBlob(storedSourceUrl, `original-${Date.now()}`);
+        storedSourceUrl = up.url;
       } catch (e) {
-        console.warn(`[bundles-create] copy source failed: ${e}`);
+        console.warn(`[bundles-create] dataUrl->Blob (source) failed: ${e}`);
+      }
+    }
+    if (isDataUrl(storedLineArtUrl)) {
+      try {
+        const up = await uploadDataUrlToBlob(storedLineArtUrl, `lineart-${Date.now()}`);
+        storedLineArtUrl = up.url;
+      } catch (e) {
+        console.warn(`[bundles-create] dataUrl->Blob (lineart) failed: ${e}`);
+      }
+    }
+
+    // 2) Optionally copy remote assets into our bucket (but only if they're http(s) URLs)
+    if (copyAssets) {
+      if (isHttpUrl(storedSourceUrl)) {
+        try {
+          const src = await fetchAsBuffer(storedSourceUrl);
+          const putSrc = await put(`${baseKey}/source.jpg`, src.buf, {
+            access: "public",
+            contentType: src.contentType || "image/jpeg",
+          });
+          storedSourceUrl = putSrc.url;
+        } catch (e) {
+          console.warn(`[bundles-create] copy source failed: ${e}`);
+        }
       }
 
-      try {
-        const out = await fetchAsBuffer(lineArtUrl);
-        const putOut = await put(`${baseKey}/lineart.jpg`, out.buf, {
-          access: "public",
-          contentType: out.contentType || "image/jpeg",
-        });
-        storedLineArtUrl = putOut.url;
-      } catch (e) {
-        console.warn(`[bundles-create] copy lineart failed: ${e}`);
+      if (isHttpUrl(storedLineArtUrl)) {
+        try {
+          const out = await fetchAsBuffer(storedLineArtUrl);
+          const putOut = await put(`${baseKey}/lineart.jpg`, out.buf, {
+            access: "public",
+            contentType: out.contentType || "image/jpeg",
+          });
+          storedLineArtUrl = putOut.url;
+        } catch (e) {
+          console.warn(`[bundles-create] copy lineart failed: ${e}`);
+        }
       }
     }
 
     const createdAt = new Date().toISOString();
-    const portalUrl = `${BASE}/p/${id}`;
+    const portalUrl = `${resolveBase(req)}/p/${id}`;
     const manifest = {
       id,
       createdAt,
