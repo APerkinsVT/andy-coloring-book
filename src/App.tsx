@@ -13,7 +13,8 @@ import type { Tip } from "@/types/tips";
 
 import { generateColorPlan } from "@/services/color";
 import { generateAiLineArt } from "@/services/aiLineart";
-import { openPrintView } from "@/print";
+// OLD: import { openPrintView } from "@/print";
+import PrintLayout from "@/print/PrintLayout";
 import { suggestTips } from "@/utils/suggestTips";
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -121,21 +122,6 @@ export default function App() {
     }
   }
 
-  function onPrintPdf() {
-    if (!lineUrl) return;
-    const printablePlan = plan ? buildPrintableFromPlan(plan, kit) : undefined;
-
-    openPrintView({
-      lineArtDataUrl: lineUrl,
-      originalDataUrl: sourceDataUrl,
-      fileName,
-      orientation:
-        ((plan as any)?.source?.orientation as "portrait" | "landscape") || "portrait",
-      colorPlan: printablePlan,
-      tips: tipsSuggested,
-    });
-  }
-
   function onDownloadPdf() {
     alert("Use “Print / Save as PDF” and choose Destination: Save as PDF.");
   }
@@ -194,7 +180,6 @@ export default function App() {
             .filter(Boolean) as ManifestTip[]
         : [];
 
-
       // palette → [{ hex, name, brand?, number? }]
       const paletteForManifest =
         plan
@@ -211,12 +196,11 @@ export default function App() {
               .slice(0, 24)
           : [];
 
-
       const payload = {
         sourceUrl: sourceUrlStr,
         lineArtUrl: lineArtUrlStr,
         tips: tipsForManifest,
-        palette: paletteForManifest,   // <— NEW
+        palette: paletteForManifest,
       };
 
       console.log("Publishing payload →", payload);
@@ -277,6 +261,7 @@ export default function App() {
             {anStatus === "analyzing" ? "Analyzing…" : "Analyze Colors"}
           </button>
 
+          {/* OLD print button removed:
           <button
             className="px-3 py-2 rounded-md bg-white border text-slate-900 disabled:opacity-50"
             onClick={onPrintPdf}
@@ -285,6 +270,56 @@ export default function App() {
           >
             Print / Save as PDF
           </button>
+          */}
+
+          {/* NEW: 2-page PDF generator */}
+          <PrintLayout
+            lineArtUrl={lineUrl || ""}
+            originalUrl={sourceUrl || sourceDataUrl || ""}
+            filename={fileName}
+
+            // Page 2: short general tips (top-right)
+            generalTips={
+              (tipsSuggested || [])
+                .map((t: any) => String(t?.text || "").trim())
+                .filter(Boolean)
+                .slice(0, 3)
+            }
+
+            // Page 2: Suggestions table (Area / FC Pencil / Suggestion)
+            suggestions={
+              (tipsSuggested || []).map((t: any, i: number) => {
+                // Pencil info can live under different keys; be defensive.
+                const pencil = t?.pencil || {};
+                const fcNo =
+                  (pencil.number != null ? String(pencil.number) : undefined) ??
+                  (t.fcNo != null ? String(t.fcNo) : undefined);
+
+                const fcName =
+                  (typeof pencil.name === "string" && pencil.name) ??
+                  (typeof t.name === "string" && t.name) ??
+                  undefined;
+
+                // If your Tip has a target/region field, prefer it; else fall back.
+                const area =
+                  (typeof t.area === "string" && t.area) ||
+                  (typeof t.region === "string" && t.region) ||
+                  // fallback: use the first words of the tip as a label
+                  "";
+
+                return {
+                  area,
+                  fcNo,
+                  fcName,
+                  tip: String(t?.text || "").trim(),
+                  hex: typeof t.hex === "string" ? t.hex : undefined,
+                };
+              })
+              // Only keep rows that actually have a tip or a pencil reference
+              .filter((r: any) => r.tip || r.fcNo || r.fcName)
+            }
+          />
+
 
           <button
             onClick={handlePublishToPortal}
